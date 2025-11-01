@@ -11,6 +11,7 @@ import de.smartdata.lyser.data.SmartDataAccessor;
 import de.smartdata.lyser.data.SmartDataAccessorException;
 import de.smartdata.lyser.threads.ActivindexThread;
 import de.smartdata.lyser.threads.CountThread;
+import jakarta.json.Json;
 import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
 import jakarta.ws.rs.Consumes;
@@ -408,7 +409,6 @@ public class StatisticResource implements Serializable {
 
     @GET
     @Path("forAllDevices")
-    @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @SmartUserAuth
     @Operation(summary = "For All Devices",
@@ -455,5 +455,36 @@ public class StatisticResource implements Serializable {
 
         rob.setStatus(Response.Status.OK);
         return rob.toResponse();
+    }
+
+    /**
+     * Returns a detailed overview of all devices including their status,
+     * last sync timestamp and position.
+     *
+     * Example:
+     * GET /SmartDataLyser/smartdatalyser/statistic/deviceOverview?smartdataurl=http://localhost:8080/SmartDataAirquality&storage=smartmonitoring
+     */
+    @GET
+    @Path("/deviceOverview")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response getDeviceOverview(
+            @QueryParam("smartdataurl") String smartdataurl,
+            @QueryParam("storage") String storage) {
+
+        de.ngi.logging.Logger.log("API: getDeviceOverview called");
+
+        try {
+            SmartDataAccessor acc = new SmartDataAccessor(smartdataurl);
+            JsonArray overview = acc.getDeviceOverview(storage);
+            return Response.ok(overview).build();
+
+        } catch (SmartDataAccessorException e) {
+            de.ngi.logging.Logger.log("Error: " + e.getMessage());
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(Json.createObjectBuilder()
+                            .add("error", e.getMessage())
+                            .build())
+                    .build();
+        }
     }
 }

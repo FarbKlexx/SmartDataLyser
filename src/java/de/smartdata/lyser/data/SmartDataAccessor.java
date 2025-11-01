@@ -975,4 +975,95 @@ public class SmartDataAccessor {
             return false;
         }
     }
+
+    /**
+     * Builds a complete overview of all observed devices, including:
+     *  - id, name, data_collection, type
+     *  - last_sync timestamp
+     *  - position
+     *  - online/offline status
+     */
+    public JsonArray getDeviceOverview(String storage) throws SmartDataAccessorException {
+        de.ngi.logging.Logger.log("Accessor: Building device overview...");
+        JsonArrayBuilder resultArray = Json.createArrayBuilder();
+
+        try (Connection con = getConnection()) {
+
+            String sqlDevices = "SELECT id, name, data_collection, description FROM " + storage + ".tbl_observedobject ORDER BY id ASC";
+            try (PreparedStatement ps = con.prepareStatement(sqlDevices);
+                 ResultSet rs = ps.executeQuery()) {
+
+                while (rs.next()) {
+                    int id = rs.getInt("id");
+                    String name = rs.getString("name");
+                    String dataCollection = rs.getString("data_collection");
+                    String type = rs.getString("description");
+
+                    JsonObjectBuilder dev = Json.createObjectBuilder()
+                            .add("id", id)
+                            .add("name", name != null ? name : "Unknown")
+                            .add("data_collection", dataCollection != null ? dataCollection : "N/A")
+                            .add("type", type != null ? type : "N/A");
+
+                    if (dataCollection != null && !dataCollection.isEmpty()) {
+                        String sqlLatest = "SELECT ts, ST_AsGeoJSON(pos) AS pos FROM " + storage + "." + dataCollection + " ORDER BY ts DESC LIMIT 1";
+                        try (PreparedStatement ps2 = con.prepareStatement(sqlLatest);
+                             ResultSet rs2 = ps2.executeQuery()) {
+
+                            if (rs2.next()) {
+                                Timestamp ts = rs2.getTimestamp("ts");
+                                String pos = rs2.getString("pos");
+
+                                dev.add("last_sync", ts != null ? ts.toString() : "N/A");
+
+                                if (pos != null && !pos.isEmpty()) {
+                                    try (JsonReader reader = Json.createReader(new StringReader(pos))) {
+                                        JsonObject posObj = reader.readObject();
+
+                                        JsonArray coords = posObj.getJsonArray("coordinates");
+                                        if (coords != null && coords.size() == 2) {
+                                            String coordStr = coords.getJsonNumber(0).toString() + "," + coords.getJsonNumber(1).toString();
+                                            dev.add("position", coordStr);
+                                        } else {
+                                            dev.add("position", Json.createObjectBuilder()
+                                                    .add("type", "Point")
+                                                    .add("coordinates", Json.createArrayBuilder().build()));
+                                        }
+                                    } catch (Exception parseErr) {
+                                        de.ngi.logging.Logger.log("Invalid GeoJSON for " + dataCollection + ": " + pos);
+                                        dev.add("position", Json.createObjectBuilder()
+                                                .add("type", "Point")
+                                                .add("coordinates", Json.createArrayBuilder().build()));
+                                    }
+                                } else {
+                                    dev.add("position", Json.createObjectBuilder()
+                                            .add("type", "Point")
+                                            .add("coordinates", Json.createArrayBuilder().build()));
+                                }
+
+                                String status = "Offline";
+                                if (ts != null && (System.currentTimeMillis() - ts.getTime()) < 5 * 60 * 1000) {
+                                    status = "Online";
+                                }
+                                dev.add("status", status);
+                            } else {
+                                dev.add("last_sync", "N/A");
+                                dev.add("status", "No data");
+                            }
+
+                        } catch (SQLException ex) {
+                            dev.add("status", "Error reading " + dataCollection);
+                        }
+                    }
+
+                    resultArray.add(dev);
+                }
+            }
+
+        } catch (SQLException e) {
+            throw new SmartDataAccessorException("Error building device overview: " + e.getMessage());
+        }
+
+        return resultArray.build();
+    }
 }
