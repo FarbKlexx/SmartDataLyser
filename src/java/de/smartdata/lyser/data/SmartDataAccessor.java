@@ -978,9 +978,9 @@ public class SmartDataAccessor {
 
     /**
      * Builds a complete overview of all observed devices, including:
-     *  - id, name, data_collection, type
+     *  - id, name, data_collection, type (from tbl_ootype)
      *  - last_sync timestamp
-     *  - position
+     *  - position as "longitude,latitude"
      *  - online/offline status
      */
     public JsonArray getDeviceOverview(String storage) throws SmartDataAccessorException {
@@ -989,7 +989,13 @@ public class SmartDataAccessor {
 
         try (Connection con = getConnection()) {
 
-            String sqlDevices = "SELECT id, name, data_collection, description FROM " + storage + ".tbl_observedobject ORDER BY id ASC";
+            // Device info + type from tbl_ootype
+            String sqlDevices =
+                    "SELECT o.id, o.name, o.data_collection, t.name AS type " +
+                            "FROM " + storage + ".tbl_observedobject o " +
+                            "LEFT JOIN " + storage + ".tbl_ootype t ON o.ootype_id = t.id " +
+                            "ORDER BY o.id ASC";
+
             try (PreparedStatement ps = con.prepareStatement(sqlDevices);
                  ResultSet rs = ps.executeQuery()) {
 
@@ -997,7 +1003,7 @@ public class SmartDataAccessor {
                     int id = rs.getInt("id");
                     String name = rs.getString("name");
                     String dataCollection = rs.getString("data_collection");
-                    String type = rs.getString("description");
+                    String type = rs.getString("type");
 
                     JsonObjectBuilder dev = Json.createObjectBuilder()
                             .add("id", id)
@@ -1005,8 +1011,13 @@ public class SmartDataAccessor {
                             .add("data_collection", dataCollection != null ? dataCollection : "N/A")
                             .add("type", type != null ? type : "N/A");
 
+                    // --- Check if there’s a valid data collection table ---
                     if (dataCollection != null && !dataCollection.isEmpty()) {
-                        String sqlLatest = "SELECT ts, ST_AsGeoJSON(pos) AS pos FROM " + storage + "." + dataCollection + " ORDER BY ts DESC LIMIT 1";
+                        String sqlLatest =
+                                "SELECT ts, CONCAT(ST_X(pos), ',', ST_Y(pos)) AS pos " +
+                                        "FROM " + storage + "." + dataCollection + " " +
+                                        "ORDER BY ts DESC LIMIT 1";
+
                         try (PreparedStatement ps2 = con.prepareStatement(sqlLatest);
                              ResultSet rs2 = ps2.executeQuery()) {
 
@@ -1014,46 +1025,40 @@ public class SmartDataAccessor {
                                 Timestamp ts = rs2.getTimestamp("ts");
                                 String pos = rs2.getString("pos");
 
+                                // --- last_sync timestamp ---
                                 dev.add("last_sync", ts != null ? ts.toString() : "N/A");
 
-                                if (pos != null && !pos.isEmpty()) {
-                                    try (JsonReader reader = Json.createReader(new StringReader(pos))) {
-                                        JsonObject posObj = reader.readObject();
-
-                                        JsonArray coords = posObj.getJsonArray("coordinates");
-                                        if (coords != null && coords.size() == 2) {
-                                            String coordStr = coords.getJsonNumber(0).toString() + "," + coords.getJsonNumber(1).toString();
-                                            dev.add("position", coordStr);
-                                        } else {
-                                            dev.add("position", Json.createObjectBuilder()
-                                                    .add("type", "Point")
-                                                    .add("coordinates", Json.createArrayBuilder().build()));
-                                        }
-                                    } catch (Exception parseErr) {
-                                        de.ngi.logging.Logger.log("Invalid GeoJSON for " + dataCollection + ": " + pos);
-                                        dev.add("position", Json.createObjectBuilder()
-                                                .add("type", "Point")
-                                                .add("coordinates", Json.createArrayBuilder().build()));
-                                    }
+                                // --- Position as string or empty placeholder ---
+                                if (pos != null && !pos.isEmpty() && !pos.equals(",")) {
+                                    dev.add("position", pos);
                                 } else {
-                                    dev.add("position", Json.createObjectBuilder()
-                                            .add("type", "Point")
-                                            .add("coordinates", Json.createArrayBuilder().build()));
+                                    dev.add("position", "N/A");
                                 }
 
+                                // --- Online/offline status ---
                                 String status = "Offline";
                                 if (ts != null && (System.currentTimeMillis() - ts.getTime()) < 5 * 60 * 1000) {
                                     status = "Online";
                                 }
                                 dev.add("status", status);
+
                             } else {
                                 dev.add("last_sync", "N/A");
+                                dev.add("position", "N/A");
                                 dev.add("status", "No data");
                             }
 
                         } catch (SQLException ex) {
+                            de.ngi.logging.Logger.log("Error reading " + dataCollection + ": " + ex.getMessage());
+                            dev.add("last_sync", "N/A");
+                            dev.add("position", "N/A");
                             dev.add("status", "Error reading " + dataCollection);
                         }
+                    } else {
+                        // No data collection table
+                        dev.add("last_sync", "N/A");
+                        dev.add("position", "N/A");
+                        dev.add("status", "No table");
                     }
 
                     resultArray.add(dev);
@@ -1066,4 +1071,5 @@ public class SmartDataAccessor {
 
         return resultArray.build();
     }
+
 }
