@@ -903,4 +903,76 @@ public class SmartDataAccessor {
                 throw new IllegalArgumentException("Unsupported JSON type: " + jsonValue.getValueType());
         }
     }
+
+    /**
+     * Returns the total number of rows across all device data_collections.
+     *
+     * @param smartdataurl  URL of smartdata instance to use
+     * @param collection    Collection to write in
+     * @param storage       Storage to write in
+     * @return Total number of datasets across all available data_collections
+     * @throws SmartDataAccessorException if a database or SQL error occurs
+     */
+    public int fetchTotalDatasetCount(String smartdataurl, String collection, String storage)
+            throws SmartDataAccessorException {
+
+        de.ngi.logging.Logger.log("Calculating total dataset count via " + smartdataurl);
+        int totalCount = 0;
+
+        try (Connection con = this.getConnection()) {
+            if (con == null)
+                throw new SmartDataAccessorException("No DB connection available");
+
+            String queryDevices = "SELECT data_collection FROM " + storage + "." + collection;
+            try (PreparedStatement psDevices = con.prepareStatement(queryDevices);
+                 ResultSet rsDevices = psDevices.executeQuery()) {
+
+                while (rsDevices.next()) {
+                    String tableName = rsDevices.getString("data_collection");
+
+                    if (tableName == null || tableName.trim().isEmpty()) {
+                        de.ngi.logging.Logger.log("Skip device with NULL data_collection");
+                        continue;
+                    }
+
+                    if (!tableExists(con, storage, tableName)) {
+                        de.ngi.logging.Logger.log("Table does not exist: " + storage + "." + tableName);
+                        continue;
+                    }
+
+                    String countQuery = "SELECT COUNT(*) AS cnt FROM " + storage + "." + tableName;
+                    try (PreparedStatement psCount = con.prepareStatement(countQuery);
+                         ResultSet rsCount = psCount.executeQuery()) {
+
+                        if (rsCount.next()) {
+                            int cnt = rsCount.getInt("cnt");
+                            totalCount += cnt;
+                            de.ngi.logging.Logger.log("Counted " + cnt + " entries in " + tableName);
+                        }
+
+                    } catch (SQLException e) {
+                        de.ngi.logging.Logger.log("Warning: could not count " + tableName + " (" + e.getMessage() + ")");
+                    }
+                }
+            }
+
+        } catch (SQLException e) {
+            throw new SmartDataAccessorException("Error counting datasets: " + e.getMessage());
+        }
+
+        de.ngi.logging.Logger.log("Total dataset count across all collections: " + totalCount);
+        return totalCount;
+    }
+
+    /**
+     * Checks if a given table exists in the specified schema.
+     */
+    private boolean tableExists(Connection con, String schema, String table) {
+        try (ResultSet rs = con.getMetaData().getTables(null, schema, table, null)) {
+            return rs.next();
+        } catch (SQLException e) {
+            de.ngi.logging.Logger.log("Error checking table existence for " + schema + "." + table + ": " + e.getMessage());
+            return false;
+        }
+    }
 }

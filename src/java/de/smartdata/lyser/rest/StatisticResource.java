@@ -405,4 +405,55 @@ public class StatisticResource implements Serializable {
         rob.setStatus(Response.Status.OK);
         return rob.toResponse();
     }
+
+    @GET
+    @Path("forAllDevices")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @SmartUserAuth
+    @Operation(summary = "For All Devices",
+            description = "Statistics of all Devices")
+    @APIResponse(
+            responseCode = "200",
+            description = "Compare result")
+    @APIResponse(
+            responseCode = "404",
+            description = "Collection could not be found")
+    @APIResponse(
+            responseCode = "500",
+            description = "Internal error")
+    public Response forAllDevices(
+            @Parameter(description = "SmartData URL", required = true) @QueryParam("smartdataurl") String smartdataurl,
+            @Parameter(description = "Collection name") @QueryParam("collection") String collection,
+            @Parameter(description = "Storage name", schema = @Schema(type = STRING, defaultValue = "public")) @QueryParam("storage") String storage) {
+
+        ResponseObjectBuilder rob = new ResponseObjectBuilder();
+
+        SmartDataAccessor acc = new SmartDataAccessor(smartdataurl);
+
+        if (smartdataurl.startsWith("/")) {
+            smartdataurl = "http://localhost:8080" + smartdataurl;
+        }
+
+        if (collection == null) {
+            rob.setStatus(Response.Status.BAD_REQUEST);
+            rob.addErrorMessage("Parameter >collection< is missing.");
+            return rob.toResponse();
+        }
+
+        try {
+            long countStartTS = System.nanoTime();
+            // Get number of all datasets
+            rob.add("count", acc.fetchTotalDatasetCount(smartdataurl, collection, storage));
+            long countEndTS = System.nanoTime();
+            rob.add("count_exectime", (countEndTS - countStartTS) / 1000000);
+
+        } catch (SmartDataAccessorException ex) {
+            rob.setStatus(Response.Status.INTERNAL_SERVER_ERROR);
+            rob.addErrorMessage("Could not get data for >" + collection + "<: " + ex.getLocalizedMessage());
+        }
+
+        rob.setStatus(Response.Status.OK);
+        return rob.toResponse();
+    }
 }
