@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>SmartDataLyser</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="stylesheet" type="text/css" href="/SWAC/css/global.css">
+        <link rel="stylesheet" type="text/css" href="/SWAC/css/index.css">
+        
+        <link rel="stylesheet" type="text/css" href="/SWAC/swac/libs/uikit/css/uikit.min.css">
+        <script src="/SWAC/swac/libs/uikit/js/uikit.min.js"></script>
+        <script src="/SWAC/swac/swac.js" type="module"></script>
+        <script src="index.js"></script>
+    </head>
+    <body>
+        <h1>SmartDataLyser</h1>
+        <p>This service allows you data analysis on SmartData instances.</p>
+
+        <ul uk-accordion>
+            <li class="uk-open">
+                <a class="uk-accordion-title" href="#">API documentation</a>
+                <div class="uk-accordion-content">
+                    <p>This SmartDataLyser instance can be accessed by REST API.</p>
+                    <div class="uk-child-width-1-3@m uk-grid-small uk-grid-match" uk-grid>
+                        <div>
+                            <div class="uk-card uk-card-default uk-card-body">
+                                <h3 class="uk-card-title">Swagger UI</h3>
+                                <a class="smartdata_swaggerlink" href="/swagger">
+                                    <img src="imgs/swagger.png" width="150" height = "150" alt="Swagger UI">
+                                    <p>-> Documentation with live tryout</p>
+                                </a>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="uk-card uk-card-primary uk-card-body">
+                                <h3 class="uk-card-title">Smart*Ecosystem</h3>
+                                <a href="http://git01-ifm-min.ad.fh-bielefeld.de/Forschung/smartecosystem">
+                                    <img src="imgs/SmartEcosystemLogo.jpg" width="150" height = "150" alt="Smart*Ecosystem">
+                                    <p>-> SmartData is part of Smart*Ecosystem</p>
+                                </a>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="uk-card uk-card-secondary uk-card-body">
+                                <h3 class="uk-card-title">Full API Specification</h3>
+                                <a href="http://git01-ifm-min.ad.fh-bielefeld.de/Forschung/smartecosystem/smartdata/-/wikis/home">
+                                    <img src="imgs/SmartDataLyserLogo.jpg" width="150" height = "150" alt="SmartDataLyserAPI">
+                                    <p>-> Full specification behavior and testcases</p>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </li>
+            <!--<li>
+                <a class="uk-accordion-title" href="#">SmartDataLyser configuration</a>
+                <div class="uk-accordion-content">
+                    <p>This SmartData instance is runing with the following configuration:</p>
+                    <div id="smartdata_config" swa="Present FROM smartdatalyser/system/config"></div>
+                </div>
+            </li>-->
+        </ul>
+    </body>
+</html>

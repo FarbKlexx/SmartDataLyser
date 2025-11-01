@@ -1,0 +1,15 @@
+<component name="libraryTable">
+  <library name="lib">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/build/web/WEB-INF/lib/NGI_Logger.jar!/" />
+      <root url="jar://$PROJECT_DIR$/build/web/WEB-INF/lib/SmartUserAuth.jar!/" />
+      <root url="jar://$PROJECT_DIR$/build/web/WEB-INF/lib/microprofile-openapi-api-3.1.jar!/" />
+      <root url="jar://$PROJECT_DIR$/build/web/WEB-INF/lib/NGI_RestUtils.jar!/" />
+      <root url="jar://$PROJECT_DIR$/build/web/WEB-INF/lib/NGI_AdvancedReflection.jar!/" />
+      <root url="jar://$PROJECT_DIR$/build/web/WEB-INF/lib/simplelatlng-1.4.0.jar!/" />
+      <root url="jar://$PROJECT_DIR$/build/web/WEB-INF/lib/jakarta.jakartaee-api-10.0.0.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
