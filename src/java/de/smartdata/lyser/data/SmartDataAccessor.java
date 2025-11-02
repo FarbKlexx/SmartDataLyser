@@ -240,7 +240,7 @@ public class SmartDataAccessor {
         String includes = column;
         String order = column + ",DESC";
         // Get datasets
-        JsonArray datasets = this.fetchData(smartdataurl, collection, storage, includes, null, dateattr, start, end, order, null);
+        JsonArray datasets = this.fetchData(smartdataurl, collection, storage, includes, null, dateattr, start, end, order);
         for (JsonNumber curVal : datasets.getValuesAs(JsonNumber.class)) {
             values.add(curVal.bigDecimalValue().doubleValue());
         }
@@ -305,7 +305,7 @@ public class SmartDataAccessor {
         String includes = column;
         String order = column + ",DESC";
         // Get datasets
-        JsonArray datasets = this.fetchData(smartdataurl, collection, storage, includes, null, dateattr, start, end, order, null);
+        JsonArray datasets = this.fetchData(smartdataurl, collection, storage, includes, null, dateattr, start, end, order);
         for (JsonNumber curVal : datasets.getValuesAs(JsonNumber.class)) {
             values.add(curVal.bigDecimalValue().doubleValue());
         }
@@ -380,7 +380,7 @@ public class SmartDataAccessor {
         String includes = column;
         String order = column + ",DESC";
         // Get datasets
-        JsonArray datasets = this.fetchData(smartdataurl, collection, storage, includes, null, dateattr, start, end, order, null);
+        JsonArray datasets = this.fetchData(smartdataurl, collection, storage, includes, null, dateattr, start, end, order);
         for (JsonNumber curVal : datasets.getValuesAs(JsonNumber.class)) {
             values.add(curVal.bigDecimalValue().doubleValue());
         }
@@ -569,15 +569,11 @@ public class SmartDataAccessor {
      * @param start Startdate to look at
      * @param end Enddate to look at
      * @param order Attribute name to order by
-     * @param limit Number of datasets to fetch
      * @return JSON with available data
      * @throws de.smartdata.lyser.data.SmartDataAccessorException
      */
-    public JsonArray fetchData(String smartdataurl, String collection,
-            String storage, String includes, List<String> filters,
-            String dateattr, LocalDateTime start, LocalDateTime end,
-            String order, Long limit) throws SmartDataAccessorException {
-
+    public JsonArray fetchData(String smartdataurl, String collection, String storage, String includes, List<String> filters, String dateattr, LocalDateTime start, LocalDateTime end, String order) throws SmartDataAccessorException {
+        Integer limit = null;
         // Local direct db access
         Connection con = this.getConnection();
         if (con != null && filters == null) {
@@ -677,8 +673,7 @@ public class SmartDataAccessor {
         }
 
         // Get information about file from SmartData
-        WebTarget webTarget = WebTargetCreator.createWebTarget(
-                smartdataurl + "/smartdata", "records")
+        WebTarget webTarget = WebTargetCreator.createWebTarget(smartdataurl + "/smartdata", "records")
                 .path(collection)
                 .queryParam("storage", storage);
         if (filters != null) {
@@ -903,4 +898,73 @@ public class SmartDataAccessor {
                 throw new IllegalArgumentException("Unsupported JSON type: " + jsonValue.getValueType());
         }
     }
+    /**
+    * Gets all distinct days from the "ts" column in a collection
+    *
+    * @param smartdataurl SmartData's URL
+    * @param collection Collection's name (table name)
+    * @param storage Storage's name (schema name)
+    * @return List of distinct dates as strings in YYYY-MM-DD format
+    * @throws SmartDataAccessorException
+    */
+   public List<String> fetchDistinctDays(String smartdataurl, String collection, String storage) throws SmartDataAccessorException {
+       List<String> distinctDays = new ArrayList<>();
+
+       // Try local direct DB access first
+       Connection con = this.getConnection();
+       if (con != null) {
+           try {
+               // SQL query to get distinct dates from the ts column
+               String sql = "SELECT DISTINCT CAST(\"ts\" AS DATE) AS day FROM \"" + storage + "\".\"" + collection + "\" ORDER BY day";
+
+               try (PreparedStatement preparedStatement = con.prepareStatement(sql); ResultSet resultSet = preparedStatement.executeQuery()) {
+
+                   while (resultSet.next()) {
+                       Date date = resultSet.getDate("day");
+                       if (date != null) {
+                           distinctDays.add(date.toString()); // Returns in YYYY-MM-DD format
+                       }
+                   }
+
+               }
+               return distinctDays;
+           } catch (SQLException ex) {
+               throw new SmartDataAccessorException("Could not get distinct days from >" + collection
+                   + "<: SQL error occurred: " + ex.getLocalizedMessage());
+           } finally {
+               try {
+                   con.close();
+               } catch (SQLException ex) {
+                   throw new SmartDataAccessorException("Could not close DB connection. Possible memory leak: "
+                       + ex.getLocalizedMessage());
+               }
+           }
+       }
+
+       // Use the fetchData method to get all ts values
+       JsonArray datasets = this.fetchData(smartdataurl, collection, storage, "ts", null, null, null, null, null);
+       // Extract distinct dates
+       for (JsonValue value : datasets) {
+           JsonObject obj = value.asJsonObject();
+           if (obj.containsKey("ts")) {
+               String tsValue = obj.getString("ts");
+               try {
+                   // Parse the timestamp and extract the date part
+                   Instant instant = Instant.parse(tsValue);
+                   String dateStr = instant.atZone(java.time.ZoneId.systemDefault())
+                           .toLocalDate()
+                           .toString();
+                   if (!distinctDays.contains(dateStr)) {
+                       distinctDays.add(dateStr);
+                   }
+               } catch (DateTimeParseException e) {
+                   // Skip if timestamp format is invalid
+
+               }
+           }
+       }
+       // Sort the dates
+       distinctDays.sort(String::compareTo);
+       return distinctDays;
+   }
 }

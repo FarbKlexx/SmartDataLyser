@@ -166,7 +166,7 @@ public class DataAggregationResource implements Serializable {
             SmartDataAccessor acc = new SmartDataAccessor(curSource.smartdataurl);
 
             try {
-                curData = acc.fetchData(curSource.smartdataurl, curSource.collection, curSource.storage, curSource.includes, curSource.filter, request.date_attr, startDate, endDate, curSource.order, curSource.limit);
+                curData = acc.fetchData(curSource.smartdataurl, curSource.collection, curSource.storage, curSource.includes, curSource.filter, request.date_attr, startDate, endDate, curSource.order);
                 inputDataSetsCount += curData.size();
                 inputDataSetsUrlsBuilder.add(acc.getSmartdataRequest());
                 // Check if there is data

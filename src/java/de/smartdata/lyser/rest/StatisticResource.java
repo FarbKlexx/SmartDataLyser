@@ -371,7 +371,7 @@ public class StatisticResource implements Serializable {
             rob.add("byte_exectime", (byteEndTS - byteStartTS) / 1000000);
 
             long firstStartTS = System.nanoTime();
-            JsonArray firstSets = acc.fetchData(smartdataurl, collection, storage, dateattribute, filters, dateattribute, null, null, dateattribute + ",asc", 1L);
+            JsonArray firstSets = acc.fetchData(smartdataurl, collection, storage, dateattribute, filters, dateattribute, null, null, dateattribute + ",asc");
             if (firstSets != null) {
                 JsonObject firstSet = firstSets.getJsonObject(0);
                 if (firstSet != null && firstSet.containsKey(dateattribute)) {
@@ -385,7 +385,7 @@ public class StatisticResource implements Serializable {
             rob.add("first_exectime", (firstEndTS - firstStartTS) / 1000000);
 
             long lastStartTS = System.nanoTime();
-            JsonArray lastSets = acc.fetchData(smartdataurl, collection, storage, dateattribute, filters, dateattribute, null, null, dateattribute + ",desc", 1L);
+            JsonArray lastSets = acc.fetchData(smartdataurl, collection, storage, dateattribute, filters, dateattribute, null, null, dateattribute + ",desc");
             if (lastSets != null) {
                 JsonObject lastSet = lastSets.getJsonObject(0);
                 if (lastSet != null && lastSet.containsKey(dateattribute)) {
