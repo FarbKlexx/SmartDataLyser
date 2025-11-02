@@ -198,6 +198,94 @@ public class RoutenResource implements Serializable {
 
         rob.setStatus(Response.Status.OK);
         return rob.toResponse();
-    }
+        }
+    
+    @GET
+    @Path("dataByDay")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @SmartUserAuth
+    @Operation(summary = "Get data by day",
+            description = "Returns all data from a collection for a specific day")
+    @APIResponse(
+            responseCode = "200",
+            description = "Data for the specified day")
+    @APIResponse(
+            responseCode = "400",
+            description = "Invalid parameters")
+    @APIResponse(
+            responseCode = "500",
+            description = "Internal error")
+    public Response getDataByDay(
+            @Parameter(description = "SmartData URL", required = true, example = "/SmartData") @QueryParam("smartdataurl") String smartdataurl,
+            @Parameter(description = "Collection name", example = "sensor_data") @QueryParam("collection") String collection,
+            @Parameter(description = "Storage name", schema = @Schema(type = STRING, defaultValue = "public")) @QueryParam("storage") String storage,
+            @Parameter(description = "Date attribute", example = "ts") @QueryParam("dateattribute") String dateattribute,
+            @Parameter(description = "Day to filter (format: yyyy-MM-dd)", example = "2023-01-15") @QueryParam("day") String day) {
 
+        ResponseObjectBuilder rob = new ResponseObjectBuilder();
+
+        if (smartdataurl.startsWith("/")) {
+            smartdataurl = "http://localhost:8080" + smartdataurl;
+        }
+
+        if (collection == null) {
+            rob.setStatus(Response.Status.BAD_REQUEST);
+            rob.addErrorMessage("Parameter >collection< is missing.");
+            return rob.toResponse();
+        }
+
+        if (dateattribute == null) {
+            rob.setStatus(Response.Status.BAD_REQUEST);
+            rob.addErrorMessage("Parameter >dateattribute< is missing.");
+            return rob.toResponse();
+        }
+
+        if (day == null) {
+            rob.setStatus(Response.Status.BAD_REQUEST);
+            rob.addErrorMessage("Parameter >day< is missing.");
+            return rob.toResponse();
+        }
+
+        try {
+            // Validieren des Datumsformats
+            LocalDateTime.parse(day + "T00:00:00");
+        } catch (DateTimeParseException e) {
+            rob.setStatus(Response.Status.BAD_REQUEST);
+            rob.addErrorMessage("Invalid day format. Expected format: yyyy-MM-dd");
+            return rob.toResponse();
+        }
+
+        SmartDataAccessor acc = new SmartDataAccessor(smartdataurl);
+
+        long startTS = System.nanoTime();
+        // Berechne den Beginn und das Ende des Tages
+        LocalDateTime startOfDay = LocalDateTime.parse(day + "T00:00:00");
+        LocalDateTime endOfDay = LocalDateTime.parse(day + "T23:59:59.999");
+
+        try {
+            // Hole alle Datensätze für diesen Tag
+            JsonArray data = acc.fetchDataSupNull(
+                    smartdataurl,
+                    collection,
+                    storage,
+                    "*", // includes - hier könnte man spezifische Attribute angeben
+                    null, // filters - hier könnten Filter hinzugefügt werden
+                    dateattribute,
+                    startOfDay,
+                    endOfDay,
+                    dateattribute // order - hier könnte man die Sortierung anpassen
+            );
+            long endTS = System.nanoTime();
+            rob.add("data", data);
+            rob.add("execution_time_ms", (endTS - startTS) / 1000000);
+            rob.add("count", data != null ? data.size() : 0);
+            rob.setStatus(Response.Status.OK);
+        } catch (SmartDataAccessorException e) {
+            rob.setStatus(Response.Status.INTERNAL_SERVER_ERROR);
+            rob.addErrorMessage("Error fetching data: " + e.getMessage());
+        }
+
+        return rob.toResponse();
+    }
 }
