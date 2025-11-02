@@ -965,6 +965,80 @@ public class SmartDataAccessor {
     }
 
     /**
+     * Returns the average PM2.5 and PM10 values across all device data_collections.
+     */
+    public float[] fetchTotalAveragePM(String smartdataurl, String collection, String storage)
+            throws SmartDataAccessorException {
+
+        de.ngi.logging.Logger.log("Calculating total PM averages via " + smartdataurl);
+        float totalPM2_5 = 0;
+        float totalPM10 = 0;
+        int countPM2_5 = 0;
+        int countPM10 = 0;
+
+        try (Connection con = this.getConnection()) {
+            if (con == null)
+                throw new SmartDataAccessorException("No DB connection available");
+
+            String queryDevices = "SELECT data_collection FROM " + storage + "." + collection;
+            try (PreparedStatement psDevices = con.prepareStatement(queryDevices);
+                 ResultSet rsDevices = psDevices.executeQuery()) {
+
+                while (rsDevices.next()) {
+                    String tableName = rsDevices.getString("data_collection");
+
+                    if (tableName == null || tableName.trim().isEmpty()) {
+                        de.ngi.logging.Logger.log("Skip device with NULL data_collection");
+                        continue;
+                    }
+
+                    if (!tableExists(con, storage, tableName)) {
+                        de.ngi.logging.Logger.log("Table does not exist: " + storage + "." + tableName);
+                        continue;
+                    }
+
+                    // Selektiere alle gültigen Werte (ignoriere NULL)
+                    String pmQuery = "SELECT pm2_5, pm10_0 FROM " + storage + "." + tableName +
+                            " WHERE pm2_5 IS NOT NULL OR pm10_0 IS NOT NULL";
+                    try (PreparedStatement psPM = con.prepareStatement(pmQuery);
+                         ResultSet rsPM = psPM.executeQuery()) {
+
+                        while (rsPM.next()) {
+                            // PM2.5
+                            float pm2_5 = rsPM.getFloat("pm2_5");
+                            if (!rsPM.wasNull()) {
+                                totalPM2_5 += pm2_5;
+                                countPM2_5++;
+                            }
+
+                            // PM10
+                            float pm10 = rsPM.getFloat("pm10_0");
+                            if (!rsPM.wasNull()) {
+                                totalPM10 += pm10;
+                                countPM10++;
+                            }
+                        }
+
+                    } catch (SQLException e) {
+                        de.ngi.logging.Logger.log("Warning: could not read " + tableName + " (" + e.getMessage() + ")");
+                    }
+                }
+            }
+
+        } catch (SQLException e) {
+            throw new SmartDataAccessorException("Error calculating PM averages: " + e.getMessage());
+        }
+
+        // Vermeide Division durch 0
+        float avgPM2_5 = countPM2_5 > 0 ? totalPM2_5 / countPM2_5 : 0;
+        float avgPM10 = countPM10 > 0 ? totalPM10 / countPM10 : 0;
+
+        de.ngi.logging.Logger.log("Averages → PM2.5=" + avgPM2_5 + ", PM10=" + avgPM10);
+        return new float[]{avgPM2_5, avgPM10};
+    }
+
+
+    /**
      * Checks if a given table exists in the specified schema.
      */
     private boolean tableExists(Connection con, String schema, String table) {

@@ -448,6 +448,15 @@ public class StatisticResource implements Serializable {
             long countEndTS = System.nanoTime();
             rob.add("count_exectime", (countEndTS - countStartTS) / 1000000);
 
+            long pmStartTS = System.nanoTime();
+            // Get average pm2.5 and pm10 values
+            float[] avgPM = acc.fetchTotalAveragePM(smartdataurl, collection, storage);
+
+            rob.add("pm2_5", avgPM[0]);
+            rob.add("pm10", avgPM[1]);
+            long pmEndTS = System.nanoTime();
+            rob.add("count_exectime", (pmEndTS - pmStartTS) / 1000000);
+
         } catch (SmartDataAccessorException ex) {
             rob.setStatus(Response.Status.INTERNAL_SERVER_ERROR);
             rob.addErrorMessage("Could not get data for >" + collection + "<: " + ex.getLocalizedMessage());
