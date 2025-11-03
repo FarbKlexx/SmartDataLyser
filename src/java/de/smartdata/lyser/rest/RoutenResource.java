@@ -11,8 +11,11 @@ import de.smartdata.lyser.data.SmartDataAccessor;
 import de.smartdata.lyser.data.SmartDataAccessorException;
 import de.smartdata.lyser.threads.ActivindexThread;
 import de.smartdata.lyser.threads.CountThread;
+import jakarta.json.Json;
 import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
+import jakarta.json.JsonObjectBuilder;
+import jakarta.json.JsonValue;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
@@ -21,6 +24,8 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.io.Serializable;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.HashMap;
@@ -199,93 +204,190 @@ public class RoutenResource implements Serializable {
         rob.setStatus(Response.Status.OK);
         return rob.toResponse();
         }
-    
-    @GET
-    @Path("dataByDay")
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.APPLICATION_JSON)
-    @SmartUserAuth
-    @Operation(summary = "Get data by day",
-            description = "Returns all data from a collection for a specific day")
-    @APIResponse(
-            responseCode = "200",
-            description = "Data for the specified day")
-    @APIResponse(
-            responseCode = "400",
-            description = "Invalid parameters")
-    @APIResponse(
-            responseCode = "500",
-            description = "Internal error")
-    public Response getDataByDay(
-            @Parameter(description = "SmartData URL", required = true, example = "/SmartData") @QueryParam("smartdataurl") String smartdataurl,
-            @Parameter(description = "Collection name", example = "sensor_data") @QueryParam("collection") String collection,
-            @Parameter(description = "Storage name", schema = @Schema(type = STRING, defaultValue = "public")) @QueryParam("storage") String storage,
-            @Parameter(description = "Date attribute", example = "ts") @QueryParam("dateattribute") String dateattribute,
-            @Parameter(description = "Day to filter (format: yyyy-MM-dd)", example = "2023-01-15") @QueryParam("day") String day) {
+@GET
+@Path("dataByDay")
+@Consumes(MediaType.APPLICATION_JSON)
+@Produces(MediaType.APPLICATION_JSON)
+@SmartUserAuth
+@Operation(summary = "Get data by day",
+        description = "Returns all data from a collection for a specific day including first/last measurement info and total duration")
+@APIResponse(responseCode = "200", description = "Data for the specified day")
+@APIResponse(responseCode = "400", description = "Invalid parameters")
+@APIResponse(responseCode = "500", description = "Internal error")
+public Response getDataByDay(
+        @Parameter(description = "SmartData URL", required = true, example = "/SmartData") @QueryParam("smartdataurl") String smartdataurl,
+        @Parameter(description = "Collection name", example = "sensor_data") @QueryParam("collection") String collection,
+        @Parameter(description = "Storage name", schema = @Schema(type = STRING, defaultValue = "public")) @QueryParam("storage") String storage,
+        @Parameter(description = "Date attribute", example = "ts") @QueryParam("dateattribute") String dateattribute,
+        @Parameter(description = "Day to filter (format: yyyy-MM-dd)", example = "2023-01-15") @QueryParam("day") String day) {
 
-        ResponseObjectBuilder rob = new ResponseObjectBuilder();
+    ResponseObjectBuilder rob = new ResponseObjectBuilder();
 
-        if (smartdataurl.startsWith("/")) {
-            smartdataurl = "http://localhost:8080" + smartdataurl;
-        }
+    // Parameter Validation (unchanged)
+    if (smartdataurl.startsWith("/")) {
+        smartdataurl = "http://localhost:8080" + smartdataurl;
+    }
 
-        if (collection == null) {
-            rob.setStatus(Response.Status.BAD_REQUEST);
-            rob.addErrorMessage("Parameter >collection< is missing.");
-            return rob.toResponse();
-        }
-
-        if (dateattribute == null) {
-            rob.setStatus(Response.Status.BAD_REQUEST);
-            rob.addErrorMessage("Parameter >dateattribute< is missing.");
-            return rob.toResponse();
-        }
-
-        if (day == null) {
-            rob.setStatus(Response.Status.BAD_REQUEST);
-            rob.addErrorMessage("Parameter >day< is missing.");
-            return rob.toResponse();
-        }
-
-        try {
-            // Validieren des Datumsformats
-            LocalDateTime.parse(day + "T00:00:00");
-        } catch (DateTimeParseException e) {
-            rob.setStatus(Response.Status.BAD_REQUEST);
-            rob.addErrorMessage("Invalid day format. Expected format: yyyy-MM-dd");
-            return rob.toResponse();
-        }
-
-        SmartDataAccessor acc = new SmartDataAccessor(smartdataurl);
-
-        long startTS = System.nanoTime();
-        // Berechne den Beginn und das Ende des Tages
-        LocalDateTime startOfDay = LocalDateTime.parse(day + "T00:00:00");
-        LocalDateTime endOfDay = LocalDateTime.parse(day + "T23:59:59.999");
-
-        try {
-            // Hole alle Datensätze für diesen Tag
-            JsonArray data = acc.fetchDataSupNull(
-                    smartdataurl,
-                    collection,
-                    storage,
-                    "*", // includes - hier könnte man spezifische Attribute angeben
-                    null, // filters - hier könnten Filter hinzugefügt werden
-                    dateattribute,
-                    startOfDay,
-                    endOfDay,
-                    dateattribute // order - hier könnte man die Sortierung anpassen
-            );
-            long endTS = System.nanoTime();
-            rob.add("data", data);
-            rob.add("execution_time_ms", (endTS - startTS) / 1000000);
-            rob.add("count", data != null ? data.size() : 0);
-            rob.setStatus(Response.Status.OK);
-        } catch (SmartDataAccessorException e) {
-            rob.setStatus(Response.Status.INTERNAL_SERVER_ERROR);
-            rob.addErrorMessage("Error fetching data: " + e.getMessage());
-        }
-
+    if (collection == null) {
+        rob.setStatus(Response.Status.BAD_REQUEST);
+        rob.addErrorMessage("Parameter >collection< is missing.");
         return rob.toResponse();
     }
+
+    if (dateattribute == null) {
+        dateattribute = "ts"; // Default to "ts" if not provided
+    }
+
+    if (day == null) {
+        rob.setStatus(Response.Status.BAD_REQUEST);
+        rob.addErrorMessage("Parameter >day< is missing.");
+        return rob.toResponse();
+    }
+
+    try {
+        LocalDateTime.parse(day + "T00:00:00"); // Validate date format
+    } catch (DateTimeParseException e) {
+        rob.setStatus(Response.Status.BAD_REQUEST);
+        rob.addErrorMessage("Invalid day format. Expected format: yyyy-MM-dd");
+        return rob.toResponse();
+    }
+
+    SmartDataAccessor acc = new SmartDataAccessor(smartdataurl);
+    long startTS = System.nanoTime();
+
+    // Define time range
+    LocalDateTime startOfDay = LocalDateTime.parse(day + "T00:00:00");
+    LocalDateTime endOfDay = LocalDateTime.parse(day + "T23:59:59.999");
+
+    try {
+        // Fetch data
+        JsonArray data = acc.fetchDataSupNull(
+                smartdataurl,
+                collection,
+                storage,
+                "*",
+                null,
+                dateattribute,
+                startOfDay,
+                endOfDay,
+                dateattribute
+        );
+
+        // Initialize variables for first/last measurement
+        JsonObject firstMeasurement = null;
+        JsonObject lastMeasurement = null;
+        String firstTimestamp = null;
+        String lastTimestamp = null;
+        JsonObject firstPosition = null;
+        JsonObject lastPosition = null;
+        Long durationMs = null; // Duration in milliseconds
+
+        // Process data if available
+        if (data != null && !data.isEmpty()) {
+            try {
+                // First measurement
+                JsonValue firstValue = data.get(0);
+                if (firstValue != null && firstValue.getValueType() == JsonValue.ValueType.OBJECT) {
+                    JsonObject first = firstValue.asJsonObject();
+                    firstTimestamp = first.containsKey("ts") ? first.getString("ts") : null;
+                    firstMeasurement = first;
+
+                    if (first.containsKey("pos")) {
+                        JsonValue posValue = first.get("pos");
+                        if (posValue != null && posValue.getValueType() == JsonValue.ValueType.OBJECT) {
+                            firstPosition = posValue.asJsonObject();
+                        }
+                    }
+                }
+
+                // Last measurement
+                JsonValue lastValue = data.get(data.size() - 1);
+                if (lastValue != null && lastValue.getValueType() == JsonValue.ValueType.OBJECT) {
+                    JsonObject last = lastValue.asJsonObject();
+                    lastTimestamp = last.containsKey("ts") ? last.getString("ts") : null;
+                    lastMeasurement = last;
+
+                    if (last.containsKey("pos")) {
+                        JsonValue posValue = last.get("pos");
+                        if (posValue != null && posValue.getValueType() == JsonValue.ValueType.OBJECT) {
+                            lastPosition = posValue.asJsonObject();
+                        }
+                    }
+                }
+
+                // Calculate duration if both timestamps are available
+                if (firstTimestamp != null && lastTimestamp != null) {
+                    try {
+                        // Ersetze Leerzeichen durch "T" und füge "Z" für UTC hinzu
+                        String firstIso = firstTimestamp.replace(" ", "T") + "Z";
+                        String lastIso = lastTimestamp.replace(" ", "T") + "Z";
+
+                        Instant firstInstant = Instant.parse(firstIso);
+                        Instant lastInstant = Instant.parse(lastIso);
+                        durationMs = Duration.between(firstInstant, lastInstant).toMillis();
+                    } catch (DateTimeParseException e) {
+                        System.err.println("Error parsing timestamps: " + e.getMessage());
+                    }
+                }
+
+            } catch (Exception e) {
+                System.err.println("Error processing measurements: " + e.getMessage());
+            }
+        }
+
+        long endTS = System.nanoTime();
+
+        // Build response
+        rob.add("data", data);
+        rob.add("execution_time_ms", (endTS - startTS) / 1000000);
+        rob.add("count", data != null ? data.size() : 0);
+
+        // Add first/last measurement info if available
+        if (firstMeasurement != null || lastMeasurement != null) {
+            JsonObjectBuilder firstLastBuilder = Json.createObjectBuilder();
+
+            if (firstMeasurement != null) {
+                JsonObjectBuilder firstObj = Json.createObjectBuilder();
+                if (firstTimestamp != null) firstObj.add("timestamp", firstTimestamp);
+                else firstObj.addNull("timestamp");
+
+                if (firstPosition != null) firstObj.add("position", firstPosition);
+                else firstObj.addNull("position");
+
+                firstObj.add("data", firstMeasurement);
+                firstLastBuilder.add("first_measurement", firstObj);
+            }
+
+            if (lastMeasurement != null) {
+                JsonObjectBuilder lastObj = Json.createObjectBuilder();
+                if (lastTimestamp != null) lastObj.add("timestamp", lastTimestamp);
+                else lastObj.addNull("timestamp");
+
+                if (lastPosition != null) lastObj.add("position", lastPosition);
+                else lastObj.addNull("position");
+
+                lastObj.add("data", lastMeasurement);
+                firstLastBuilder.add("last_measurement", lastObj);
+            }
+
+            rob.add("first_last_measurements", firstLastBuilder.build());
+        }
+
+        // Add duration_ms to the main response (not inside first_last_measurements)
+        if (durationMs != null) {
+            rob.add("duration_ms", durationMs);
+        } else {
+            rob.add("duration_ms", JsonValue.NULL);
+        }
+
+        rob.setStatus(Response.Status.OK);
+
+    } catch (SmartDataAccessorException e) {
+        rob.setStatus(Response.Status.INTERNAL_SERVER_ERROR);
+        rob.addErrorMessage("Error fetching data: " + e.getMessage());
+    }
+
+    return rob.toResponse();
+}
+
 }
