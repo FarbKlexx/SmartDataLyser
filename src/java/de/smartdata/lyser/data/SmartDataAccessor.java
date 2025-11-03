@@ -1162,9 +1162,11 @@ public class SmartDataAccessor {
                try {
                    // Parse the timestamp and extract the date part
                    Instant instant = Instant.parse(tsValue);
+                   // Locale datetime
                    String dateStr = instant.atZone(java.time.ZoneId.systemDefault())
                            .toLocalDate()
                            .toString();
+                   // add if not already present
                    if (!distinctDays.contains(dateStr)) {
                        distinctDays.add(dateStr);
                    }

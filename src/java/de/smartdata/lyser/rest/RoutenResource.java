@@ -293,16 +293,16 @@ public class RoutenResource implements Serializable {
             if (data != null && !data.isEmpty()) {
                 try {
                     // First measurement
-                    JsonValue firstValue = data.get(0);
+                    JsonValue firstValue = data.get(0); //rausholen
                     if (firstValue != null && firstValue.getValueType() == JsonValue.ValueType.OBJECT) {
-                        JsonObject first = firstValue.asJsonObject();
-                        firstTimestamp = first.containsKey("ts") ? first.getString("ts") : null;
-                        firstMeasurement = first;
+                        JsonObject first = firstValue.asJsonObject(); //umwandeln
+                        firstTimestamp = first.containsKey("ts") ? first.getString("ts") : null; //ts extrahieren
+                        firstMeasurement = first; //speichern
 
-                        if (first.containsKey("pos")) {
+                        if (first.containsKey("pos")) { //wenn pos vorhanden
                             JsonValue posValue = first.get("pos");
                             if (posValue != null && posValue.getValueType() == JsonValue.ValueType.OBJECT) {
-                                firstPosition = posValue.asJsonObject();
+                                firstPosition = posValue.asJsonObject(); //Pos Daten speichern
                             }
                         }
                     }
@@ -354,6 +354,7 @@ public class RoutenResource implements Serializable {
                     // Calculate duration if both timestamps are available
                     if (firstTimestamp != null && lastTimestamp != null) {
                         try {
+                            //Umwandeln dann Funktion für den unterschied Nutzen
                             String firstIso = firstTimestamp.replace(" ", "T") + "Z";
                             String lastIso = lastTimestamp.replace(" ", "T") + "Z";
 
