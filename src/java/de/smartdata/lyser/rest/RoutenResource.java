@@ -203,191 +203,242 @@ public class RoutenResource implements Serializable {
 
         rob.setStatus(Response.Status.OK);
         return rob.toResponse();
+    }
+    
+    @GET
+    @Path("dataByDay")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @SmartUserAuth
+    @Operation(summary = "Get data by day",
+            description = "Returns all data from a collection for a specific day including first/last measurement info, total duration and average values")
+    @APIResponse(responseCode = "200", description = "Data for the specified day")
+    @APIResponse(responseCode = "400", description = "Invalid parameters")
+    @APIResponse(responseCode = "500", description = "Internal error")
+    public Response getDataByDay(
+            @Parameter(description = "SmartData URL", required = true, example = "/SmartData") @QueryParam("smartdataurl") String smartdataurl,
+            @Parameter(description = "Collection name", example = "sensor_data") @QueryParam("collection") String collection,
+            @Parameter(description = "Storage name", schema = @Schema(type = STRING, defaultValue = "public")) @QueryParam("storage") String storage,
+            @Parameter(description = "Date attribute", example = "ts") @QueryParam("dateattribute") String dateattribute,
+            @Parameter(description = "Day to filter (format: yyyy-MM-dd)", example = "2023-01-15") @QueryParam("day") String day) {
+
+        ResponseObjectBuilder rob = new ResponseObjectBuilder();
+
+        // Parameter Validation (unchanged)
+        if (smartdataurl.startsWith("/")) {
+            smartdataurl = "http://localhost:8080" + smartdataurl;
         }
-@GET
-@Path("dataByDay")
-@Consumes(MediaType.APPLICATION_JSON)
-@Produces(MediaType.APPLICATION_JSON)
-@SmartUserAuth
-@Operation(summary = "Get data by day",
-        description = "Returns all data from a collection for a specific day including first/last measurement info and total duration")
-@APIResponse(responseCode = "200", description = "Data for the specified day")
-@APIResponse(responseCode = "400", description = "Invalid parameters")
-@APIResponse(responseCode = "500", description = "Internal error")
-public Response getDataByDay(
-        @Parameter(description = "SmartData URL", required = true, example = "/SmartData") @QueryParam("smartdataurl") String smartdataurl,
-        @Parameter(description = "Collection name", example = "sensor_data") @QueryParam("collection") String collection,
-        @Parameter(description = "Storage name", schema = @Schema(type = STRING, defaultValue = "public")) @QueryParam("storage") String storage,
-        @Parameter(description = "Date attribute", example = "ts") @QueryParam("dateattribute") String dateattribute,
-        @Parameter(description = "Day to filter (format: yyyy-MM-dd)", example = "2023-01-15") @QueryParam("day") String day) {
 
-    ResponseObjectBuilder rob = new ResponseObjectBuilder();
+        if (collection == null) {
+            rob.setStatus(Response.Status.BAD_REQUEST);
+            rob.addErrorMessage("Parameter >collection< is missing.");
+            return rob.toResponse();
+        }
 
-    // Parameter Validation (unchanged)
-    if (smartdataurl.startsWith("/")) {
-        smartdataurl = "http://localhost:8080" + smartdataurl;
-    }
+        if (dateattribute == null) {
+            dateattribute = "ts"; // Default to "ts" if not provided
+        }
 
-    if (collection == null) {
-        rob.setStatus(Response.Status.BAD_REQUEST);
-        rob.addErrorMessage("Parameter >collection< is missing.");
-        return rob.toResponse();
-    }
+        if (day == null) {
+            rob.setStatus(Response.Status.BAD_REQUEST);
+            rob.addErrorMessage("Parameter >day< is missing.");
+            return rob.toResponse();
+        }
 
-    if (dateattribute == null) {
-        dateattribute = "ts"; // Default to "ts" if not provided
-    }
+        try {
+            LocalDateTime.parse(day + "T00:00:00"); // Validate date format
+        } catch (DateTimeParseException e) {
+            rob.setStatus(Response.Status.BAD_REQUEST);
+            rob.addErrorMessage("Invalid day format. Expected format: yyyy-MM-dd");
+            return rob.toResponse();
+        }
 
-    if (day == null) {
-        rob.setStatus(Response.Status.BAD_REQUEST);
-        rob.addErrorMessage("Parameter >day< is missing.");
-        return rob.toResponse();
-    }
+        SmartDataAccessor acc = new SmartDataAccessor(smartdataurl);
+        long startTS = System.nanoTime();
 
-    try {
-        LocalDateTime.parse(day + "T00:00:00"); // Validate date format
-    } catch (DateTimeParseException e) {
-        rob.setStatus(Response.Status.BAD_REQUEST);
-        rob.addErrorMessage("Invalid day format. Expected format: yyyy-MM-dd");
-        return rob.toResponse();
-    }
+        // Define time range
+        LocalDateTime startOfDay = LocalDateTime.parse(day + "T00:00:00");
+        LocalDateTime endOfDay = LocalDateTime.parse(day + "T23:59:59.999");
 
-    SmartDataAccessor acc = new SmartDataAccessor(smartdataurl);
-    long startTS = System.nanoTime();
+        try {
+            // Fetch data
+            JsonArray data = acc.fetchDataSupNull(
+                    smartdataurl,
+                    collection,
+                    storage,
+                    "*",
+                    null,
+                    dateattribute,
+                    startOfDay,
+                    endOfDay,
+                    dateattribute
+            );
 
-    // Define time range
-    LocalDateTime startOfDay = LocalDateTime.parse(day + "T00:00:00");
-    LocalDateTime endOfDay = LocalDateTime.parse(day + "T23:59:59.999");
+            // Initialize variables for first/last measurement
+            JsonObject firstMeasurement = null;
+            JsonObject lastMeasurement = null;
+            String firstTimestamp = null;
+            String lastTimestamp = null;
+            JsonObject firstPosition = null;
+            JsonObject lastPosition = null;
+            Long durationMs = null;
 
-    try {
-        // Fetch data
-        JsonArray data = acc.fetchDataSupNull(
-                smartdataurl,
-                collection,
-                storage,
-                "*",
-                null,
-                dateattribute,
-                startOfDay,
-                endOfDay,
-                dateattribute
-        );
+            // Initialize variables for average calculation
+            double sumPm2_5 = 0.0;
+            double sumPm10_0 = 0.0;
+            int countPm2_5 = 0;
+            int countPm10_0 = 0;
 
-        // Initialize variables for first/last measurement
-        JsonObject firstMeasurement = null;
-        JsonObject lastMeasurement = null;
-        String firstTimestamp = null;
-        String lastTimestamp = null;
-        JsonObject firstPosition = null;
-        JsonObject lastPosition = null;
-        Long durationMs = null; // Duration in milliseconds
+            // Process data if available
+            if (data != null && !data.isEmpty()) {
+                try {
+                    // First measurement
+                    JsonValue firstValue = data.get(0);
+                    if (firstValue != null && firstValue.getValueType() == JsonValue.ValueType.OBJECT) {
+                        JsonObject first = firstValue.asJsonObject();
+                        firstTimestamp = first.containsKey("ts") ? first.getString("ts") : null;
+                        firstMeasurement = first;
 
-        // Process data if available
-        if (data != null && !data.isEmpty()) {
-            try {
-                // First measurement
-                JsonValue firstValue = data.get(0);
-                if (firstValue != null && firstValue.getValueType() == JsonValue.ValueType.OBJECT) {
-                    JsonObject first = firstValue.asJsonObject();
-                    firstTimestamp = first.containsKey("ts") ? first.getString("ts") : null;
-                    firstMeasurement = first;
-
-                    if (first.containsKey("pos")) {
-                        JsonValue posValue = first.get("pos");
-                        if (posValue != null && posValue.getValueType() == JsonValue.ValueType.OBJECT) {
-                            firstPosition = posValue.asJsonObject();
+                        if (first.containsKey("pos")) {
+                            JsonValue posValue = first.get("pos");
+                            if (posValue != null && posValue.getValueType() == JsonValue.ValueType.OBJECT) {
+                                firstPosition = posValue.asJsonObject();
+                            }
                         }
                     }
-                }
 
-                // Last measurement
-                JsonValue lastValue = data.get(data.size() - 1);
-                if (lastValue != null && lastValue.getValueType() == JsonValue.ValueType.OBJECT) {
-                    JsonObject last = lastValue.asJsonObject();
-                    lastTimestamp = last.containsKey("ts") ? last.getString("ts") : null;
-                    lastMeasurement = last;
+                    // Last measurement
+                    JsonValue lastValue = data.get(data.size() - 1);
+                    if (lastValue != null && lastValue.getValueType() == JsonValue.ValueType.OBJECT) {
+                        JsonObject last = lastValue.asJsonObject();
+                        lastTimestamp = last.containsKey("ts") ? last.getString("ts") : null;
+                        lastMeasurement = last;
 
-                    if (last.containsKey("pos")) {
-                        JsonValue posValue = last.get("pos");
-                        if (posValue != null && posValue.getValueType() == JsonValue.ValueType.OBJECT) {
-                            lastPosition = posValue.asJsonObject();
+                        if (last.containsKey("pos")) {
+                            JsonValue posValue = last.get("pos");
+                            if (posValue != null && posValue.getValueType() == JsonValue.ValueType.OBJECT) {
+                                lastPosition = posValue.asJsonObject();
+                            }
                         }
                     }
-                }
 
-                // Calculate duration if both timestamps are available
-                if (firstTimestamp != null && lastTimestamp != null) {
-                    try {
-                        // Ersetze Leerzeichen durch "T" und füge "Z" für UTC hinzu
-                        String firstIso = firstTimestamp.replace(" ", "T") + "Z";
-                        String lastIso = lastTimestamp.replace(" ", "T") + "Z";
+                    // Calculate averages
+                    for (JsonValue value : data) {
+                        if (value != null && value.getValueType() == JsonValue.ValueType.OBJECT) {
+                            JsonObject obj = value.asJsonObject();
 
-                        Instant firstInstant = Instant.parse(firstIso);
-                        Instant lastInstant = Instant.parse(lastIso);
-                        durationMs = Duration.between(firstInstant, lastInstant).toMillis();
-                    } catch (DateTimeParseException e) {
-                        System.err.println("Error parsing timestamps: " + e.getMessage());
+                            // Process pm2_5
+                            if (obj.containsKey("pm2_5")) {
+                                try {
+                                    double pm2_5 = obj.getJsonNumber("pm2_5").doubleValue();
+                                    sumPm2_5 += pm2_5;
+                                    countPm2_5++;
+                                } catch (Exception e) {
+                                    // Ignore if not a number
+                                }
+                            }
+
+                            // Process pm10_0
+                            if (obj.containsKey("pm10_0")) {
+                                try {
+                                    double pm10_0 = obj.getJsonNumber("pm10_0").doubleValue();
+                                    sumPm10_0 += pm10_0;
+                                    countPm10_0++;
+                                } catch (Exception e) {
+                                    // Ignore if not a number
+                                }
+                            }
+                        }
                     }
+
+                    // Calculate duration if both timestamps are available
+                    if (firstTimestamp != null && lastTimestamp != null) {
+                        try {
+                            String firstIso = firstTimestamp.replace(" ", "T") + "Z";
+                            String lastIso = lastTimestamp.replace(" ", "T") + "Z";
+
+                            Instant firstInstant = Instant.parse(firstIso);
+                            Instant lastInstant = Instant.parse(lastIso);
+                            durationMs = Duration.between(firstInstant, lastInstant).toMillis();
+                        } catch (DateTimeParseException e) {
+                            System.err.println("Error parsing timestamps: " + e.getMessage());
+                        }
+                    }
+
+                } catch (Exception e) {
+                    System.err.println("Error processing measurements: " + e.getMessage());
+                }
+            }
+
+            long endTS = System.nanoTime();
+
+            // Build response
+            rob.add("data", data);
+            rob.add("execution_time_ms", (endTS - startTS) / 1000000);
+            rob.add("count", data != null ? data.size() : 0);
+
+            // Add averages to response
+            JsonObjectBuilder averagesBuilder = Json.createObjectBuilder();
+
+            if (countPm2_5 > 0) {
+                averagesBuilder.add("pm2_5_avg", sumPm2_5 / countPm2_5);
+            } else {
+                averagesBuilder.addNull("pm2_5_avg");
+            }
+
+            if (countPm10_0 > 0) {
+                averagesBuilder.add("pm10_0_avg", sumPm10_0 / countPm10_0);
+            } else {
+                averagesBuilder.addNull("pm10_0_avg");
+            }
+
+            rob.add("averages", averagesBuilder.build());
+
+            // Add first/last measurement info if available
+            if (firstMeasurement != null || lastMeasurement != null) {
+                JsonObjectBuilder firstLastBuilder = Json.createObjectBuilder();
+
+                if (firstMeasurement != null) {
+                    JsonObjectBuilder firstObj = Json.createObjectBuilder();
+                    if (firstTimestamp != null) firstObj.add("timestamp", firstTimestamp);
+                    else firstObj.addNull("timestamp");
+
+                    if (firstPosition != null) firstObj.add("position", firstPosition);
+                    else firstObj.addNull("position");
+
+                    firstObj.add("data", firstMeasurement);
+                    firstLastBuilder.add("first_measurement", firstObj);
                 }
 
-            } catch (Exception e) {
-                System.err.println("Error processing measurements: " + e.getMessage());
-            }
-        }
+                if (lastMeasurement != null) {
+                    JsonObjectBuilder lastObj = Json.createObjectBuilder();
+                    if (lastTimestamp != null) lastObj.add("timestamp", lastTimestamp);
+                    else lastObj.addNull("timestamp");
 
-        long endTS = System.nanoTime();
+                    if (lastPosition != null) lastObj.add("position", lastPosition);
+                    else lastObj.addNull("position");
 
-        // Build response
-        rob.add("data", data);
-        rob.add("execution_time_ms", (endTS - startTS) / 1000000);
-        rob.add("count", data != null ? data.size() : 0);
+                    lastObj.add("data", lastMeasurement);
+                    firstLastBuilder.add("last_measurement", lastObj);
+                }
 
-        // Add first/last measurement info if available
-        if (firstMeasurement != null || lastMeasurement != null) {
-            JsonObjectBuilder firstLastBuilder = Json.createObjectBuilder();
-
-            if (firstMeasurement != null) {
-                JsonObjectBuilder firstObj = Json.createObjectBuilder();
-                if (firstTimestamp != null) firstObj.add("timestamp", firstTimestamp);
-                else firstObj.addNull("timestamp");
-
-                if (firstPosition != null) firstObj.add("position", firstPosition);
-                else firstObj.addNull("position");
-
-                firstObj.add("data", firstMeasurement);
-                firstLastBuilder.add("first_measurement", firstObj);
+                rob.add("first_last_measurements", firstLastBuilder.build());
             }
 
-            if (lastMeasurement != null) {
-                JsonObjectBuilder lastObj = Json.createObjectBuilder();
-                if (lastTimestamp != null) lastObj.add("timestamp", lastTimestamp);
-                else lastObj.addNull("timestamp");
-
-                if (lastPosition != null) lastObj.add("position", lastPosition);
-                else lastObj.addNull("position");
-
-                lastObj.add("data", lastMeasurement);
-                firstLastBuilder.add("last_measurement", lastObj);
+            // Add duration_ms to the main response
+            if (durationMs != null) {
+                rob.add("duration_ms", durationMs);
+            } else {
+                rob.add("duration_ms", JsonValue.NULL);
             }
 
-            rob.add("first_last_measurements", firstLastBuilder.build());
+            rob.setStatus(Response.Status.OK);
+
+        } catch (SmartDataAccessorException e) {
+            rob.setStatus(Response.Status.INTERNAL_SERVER_ERROR);
+            rob.addErrorMessage("Error fetching data: " + e.getMessage());
         }
 
-        // Add duration_ms to the main response (not inside first_last_measurements)
-        if (durationMs != null) {
-            rob.add("duration_ms", durationMs);
-        } else {
-            rob.add("duration_ms", JsonValue.NULL);
-        }
-
-        rob.setStatus(Response.Status.OK);
-
-    } catch (SmartDataAccessorException e) {
-        rob.setStatus(Response.Status.INTERNAL_SERVER_ERROR);
-        rob.addErrorMessage("Error fetching data: " + e.getMessage());
+        return rob.toResponse();
     }
-
-    return rob.toResponse();
-}
-
 }
