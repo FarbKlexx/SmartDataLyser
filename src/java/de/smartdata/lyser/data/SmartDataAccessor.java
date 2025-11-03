@@ -569,13 +569,15 @@ public class SmartDataAccessor {
      * @param start Startdate to look at
      * @param end Enddate to look at
      * @param order Attribute name to order by
+     * @param limit Number of datasets to fetch
      * @return JSON with available data
      * @throws de.smartdata.lyser.data.SmartDataAccessorException
      */
     public JsonArray fetchData(String smartdataurl, String collection, String storage, String includes, List<String> filters, String dateattr, LocalDateTime start, LocalDateTime end, String order) throws SmartDataAccessorException {
-        Integer limit = null;
+
         // Local direct db access
         Connection con = this.getConnection();
+        Object limit = null;
         if (con != null && filters == null) {
             if (includes == null) {
                 includes = "*";
@@ -592,61 +594,44 @@ public class SmartDataAccessor {
                 if (limit != null) {
                     sql += " LIMIT " + limit;
                 }
-                PreparedStatement preparedStatement = con.prepareStatement(sql);
+                JsonArrayBuilder newdataarr;
                 // Abfrage ausführen
-                ResultSet resultSet = preparedStatement.executeQuery();
-
-                // Ergebnis in eine Liste von Maps umwandeln
-                JsonArrayBuilder newdataarr = Json.createArrayBuilder();
-                while (resultSet.next()) {
-                    JsonObjectBuilder newdataset = Json.createObjectBuilder();
-                    for (int i = 1; i <= resultSet.getMetaData().getColumnCount(); i++) {
-                        String colName = resultSet.getMetaData().getColumnName(i);
-                        String colType = resultSet.getMetaData().getColumnTypeName(i);
-
-                        switch (colType) {
-                            case "bool":
-                            case "boolean":
-                                newdataset.add(colName, resultSet.getBoolean(i));
-                                break;
-                            case "int":
-                            case "int4":
-                                newdataset.add(colName, resultSet.getInt(i));
-                                break;
-                            case "int8":
-                            case "bigserial":
-                                newdataset.add(colName, resultSet.getLong(i));
-                                break;
-                            case "float":
-                            case "float4":
-                                newdataset.add(colName, resultSet.getFloat(i));
-                                break;
-                            case "float8":
-                                newdataset.add(colName, resultSet.getDouble(i));
-                                break;
-                            case "timestamp":
-                                Date timestamp = resultSet.getTimestamp(i);
-                                if (timestamp != null) {
-                                    newdataset.add(colName, timestamp.toString());
-                                } else {
-                                    System.out.println("TEST timestamp column >" + colName + "< has value: " + timestamp);
+                try (PreparedStatement preparedStatement = con.prepareStatement(sql)) {
+                    // Abfrage ausführen
+                    ResultSet resultSet = preparedStatement.executeQuery();
+                    // Ergebnis in eine Liste von Maps umwandeln
+                    newdataarr = Json.createArrayBuilder();
+                    while (resultSet.next()) {
+                        JsonObjectBuilder newdataset = Json.createObjectBuilder();
+                        for (int i = 1; i <= resultSet.getMetaData().getColumnCount(); i++) {
+                            String colName = resultSet.getMetaData().getColumnName(i);
+                            String colType = resultSet.getMetaData().getColumnTypeName(i);
+                            
+                            switch (colType) {
+                                case "bool", "boolean" -> newdataset.add(colName, resultSet.getBoolean(i));
+                                case "int", "int4" -> newdataset.add(colName, resultSet.getInt(i));
+                                case "int8", "bigserial" -> newdataset.add(colName, resultSet.getLong(i));
+                                case "float", "float4" -> newdataset.add(colName, resultSet.getFloat(i));
+                                case "float8" -> newdataset.add(colName, resultSet.getDouble(i));
+                                case "timestamp" -> {
+                                    Date timestamp = resultSet.getTimestamp(i);
+                                    if (timestamp != null) {
+                                        newdataset.add(colName, timestamp.toString());
+                                    } else {
+                                        System.out.println("TEST timestamp column >" + colName + "< has value: " + timestamp);
+                                    }
                                 }
-                                break;
-                            case "date":
-                                Date date = resultSet.getDate(i);
-                                newdataset.add(colName, date.toString());
-                                break;
-                            case "varchar":
-                                newdataset.add(colName, resultSet.getString(i));
-                                break;
-                            default:
-                                System.out.println("Unsupported column type >" + colType + "< used.");
+                                case "date" -> {
+                                    Date date = resultSet.getDate(i);
+                                    newdataset.add(colName, date.toString());
+                                }
+                                case "varchar" -> newdataset.add(colName, resultSet.getString(i));
+                                default -> System.out.println("Unsupported column type >" + colType + "< used.");
+                            }
                         }
-                    }
-                    newdataarr.add(newdataset);
+                        newdataarr.add(newdataset);
+                    }   resultSet.close();
                 }
-                resultSet.close();
-                preparedStatement.close();
                 String json = newdataarr.build().toString();
                 try (JsonReader reader = Json.createReader(new StringReader(json))) {
                     // Lese das JSON-Array
@@ -655,7 +640,7 @@ public class SmartDataAccessor {
                 } catch (Exception e) {
                     System.err.println("Fehler beim Parsen des JSON-Strings: " + e.getMessage());
                 }
-            } catch (Exception ex) {
+            } catch (SQLException ex) {
                 throw new SmartDataAccessorException("Could not get data from >" + collection + "< an sql error occured: " + ex.getLocalizedMessage());
             } finally {
                 try {
@@ -721,7 +706,6 @@ public class SmartDataAccessor {
             throw new SmartDataAccessorException("Could not access >" + webTarget.getUri() + "< returned status: " + response.getStatus());
         }
     }
-
     /**
      * Get data from the SmartData and return it as JSON
      *
