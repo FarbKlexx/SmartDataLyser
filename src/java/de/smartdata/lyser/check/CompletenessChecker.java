@@ -48,7 +48,7 @@ public class CompletenessChecker {
             LocalDateTime end) throws SmartDataAccessorException {
 
         SmartDataAccessor sda = new SmartDataAccessor();
-        JsonArray data = sda.fetchData(smartdataurl, collection, storage, dateattribute, filters, dateattribute, start, end, null, null);
+        JsonArray data = sda.fetchData(smartdataurl, collection, storage, dateattribute, filters, dateattribute, start, end, null);
 
         ResponseObjectBuilder rob = new ResponseObjectBuilder();
         if(!data.isEmpty()) {
@@ -71,7 +71,7 @@ public class CompletenessChecker {
             LocalDateTime end) throws SmartDataAccessorException {
 
         SmartDataAccessor sda = new SmartDataAccessor();
-        JsonArray data = sda.fetchData(smartdataurl, collection, storage, dateattribute, filters, dateattribute, start, end, null, null);
+        JsonArray data = sda.fetchData(smartdataurl, collection, storage, dateattribute, filters, dateattribute, start, end, null);
 
         // Convert option input (string) into duration
         TemporalAmount freq = Duration.ofSeconds(measurefreq);
@@ -102,7 +102,7 @@ public class CompletenessChecker {
             LocalDateTime end) throws SmartDataAccessorException {
 
         SmartDataAccessor sda = new SmartDataAccessor();
-        JsonArray data = sda.fetchData(smartdataurl, collection, storage, dateattribute, filters, dateattribute, start, end, null, null);
+        JsonArray data = sda.fetchData(smartdataurl, collection, storage, dateattribute, filters, dateattribute, start, end, null);
 
         // Convert option input (string) into duration
         TemporalAmount freq = Duration.ofSeconds(measurefreq);

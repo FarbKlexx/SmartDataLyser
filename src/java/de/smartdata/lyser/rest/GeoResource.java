@@ -130,7 +130,7 @@ public class GeoResource implements Serializable {
         JsonArray data;
 
         try {
-            data = acc.fetchData(smartdataurl, collection, storage, geoattr, filters, dateattr, startDT, endDT, dateattr, null);
+            data = acc.fetchData(smartdataurl, collection, storage, geoattr, filters, dateattr, startDT, endDT, dateattr);
         } catch (SmartDataAccessorException ex) {
             rob.setStatus(Response.Status.INTERNAL_SERVER_ERROR);
             rob.addErrorMessage("Could not calculate distance because of error: " + ex.getLocalizedMessage());
@@ -241,7 +241,7 @@ public class GeoResource implements Serializable {
         JsonArray data;
 
         try {
-            data = acc.fetchData(smartdataurl, collection, storage, geoattr, filters, dateattr, startDT, endDT, dateattr, null);
+            data = acc.fetchData(smartdataurl, collection, storage, geoattr, filters, dateattr, startDT, endDT, dateattr);
         } catch (SmartDataAccessorException ex) {
             rob.setStatus(Response.Status.INTERNAL_SERVER_ERROR);
             rob.addErrorMessage("Could not calculate altitude difference because of error: " + ex.getLocalizedMessage());
@@ -408,7 +408,7 @@ public class GeoResource implements Serializable {
 
         JsonArray data;
         try {
-            data = acc.fetchData(smartdataurl, collection, storage, geoattribute, filters, dateattribute, startDT, endDT, dateattribute, null);
+            data = acc.fetchData(smartdataurl, collection, storage, geoattribute, filters, dateattribute, startDT, endDT, dateattribute);
         } catch (SmartDataAccessorException ex) {
             rob.setStatus(Response.Status.INTERNAL_SERVER_ERROR);
             rob.addErrorMessage("Could not calculate distance because of error: " + ex.getLocalizedMessage());
