@@ -346,9 +346,9 @@ public class SmartDataAccessor {
         if (con != null) {
             try {
                 // SQL-Abfrage mit einem Platzhalter für die Tabelle
-                String sql = "SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY '" + column + "') AS median FROM \"" + storage + "\".\"" + collection + "\"";
+                String sql = "SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY \"" + column + "\") AS median FROM \"" + storage + "\".\"" + collection + "\"";
                 if (dateattr != null && start != null && end != null) {
-                    sql += " WHERE " + dateattr + " >= '" + start + "' AND " + dateattr + " <= '" + end + "'";
+                    sql += " WHERE \"" + dateattr + "\" >= '" + start + "' AND \"" + dateattr + "\" <= '" + end + "'";
                 }
                 PreparedStatement preparedStatement = con.prepareStatement(sql);
 
@@ -606,7 +606,14 @@ public class SmartDataAccessor {
                         for (int i = 1; i <= resultSet.getMetaData().getColumnCount(); i++) {
                             String colName = resultSet.getMetaData().getColumnName(i);
                             String colType = resultSet.getMetaData().getColumnTypeName(i);
-                            
+                            Object val = resultSet.getObject(i);
+
+                            // ✅ NEU: Null-Werte korrekt behandeln
+                            if (val == null) {
+                                newdataset.addNull(colName);
+                                continue;
+                            }
+
                             switch (colType) {
                                 case "bool", "boolean" -> newdataset.add(colName, resultSet.getBoolean(i));
                                 case "int", "int4" -> newdataset.add(colName, resultSet.getInt(i));
@@ -617,20 +624,26 @@ public class SmartDataAccessor {
                                     Date timestamp = resultSet.getTimestamp(i);
                                     if (timestamp != null) {
                                         newdataset.add(colName, timestamp.toString());
-                                    } else {
-                                        System.out.println("TEST timestamp column >" + colName + "< has value: " + timestamp);
                                     }
                                 }
                                 case "date" -> {
                                     Date date = resultSet.getDate(i);
-                                    newdataset.add(colName, date.toString());
+                                    if (date != null) {
+                                        newdataset.add(colName, date.toString());
+                                    }
                                 }
-                                case "varchar" -> newdataset.add(colName, resultSet.getString(i));
+                                case "varchar" -> {
+                                    String str = resultSet.getString(i);
+                                    if (str != null) {
+                                        newdataset.add(colName, str);
+                                    }
+                                }
                                 default -> System.out.println("Unsupported column type >" + colType + "< used.");
                             }
                         }
                         newdataarr.add(newdataset);
-                    }   resultSet.close();
+                    }
+                    resultSet.close();
                 }
                 String json = newdataarr.build().toString();
                 try (JsonReader reader = Json.createReader(new StringReader(json))) {
@@ -662,10 +675,10 @@ public class SmartDataAccessor {
                 .path(collection)
                 .queryParam("storage", storage);
         if (filters != null) {
-            for(String curFilter : filters) {
-                if(curFilter.contains("&filter=")) {
+            for (String curFilter : filters) {
+                if (curFilter.contains("&filter=")) {
                     String[] subFilters = curFilter.split("&filter=");
-                    for(String curSubFilter : subFilters) {
+                    for (String curSubFilter : subFilters) {
                         webTarget = webTarget.queryParam("filter", curSubFilter);
                     }
                 } else {
@@ -706,6 +719,7 @@ public class SmartDataAccessor {
             throw new SmartDataAccessorException("Could not access >" + webTarget.getUri() + "< returned status: " + response.getStatus());
         }
     }
+
     /**
      * Get data from the SmartData and return it as JSON
      *
@@ -1095,140 +1109,6 @@ public class SmartDataAccessor {
     }
 
     /**
-     * Returns the total number of rows across all device data_collections.
-     *
-     * @param smartdataurl  URL of smartdata instance to use
-     * @param collection    Collection to write in
-     * @param storage       Storage to write in
-     * @return Total number of datasets across all available data_collections
-     * @throws SmartDataAccessorException if a database or SQL error occurs
-     */
-    public int fetchTotalDatasetCount(String smartdataurl, String collection, String storage)
-            throws SmartDataAccessorException {
-
-        de.ngi.logging.Logger.log("Calculating total dataset count via " + smartdataurl);
-        int totalCount = 0;
-
-        try (Connection con = this.getConnection()) {
-            if (con == null)
-                throw new SmartDataAccessorException("No DB connection available");
-
-            String queryDevices = "SELECT data_collection FROM " + storage + "." + collection;
-            try (PreparedStatement psDevices = con.prepareStatement(queryDevices);
-                 ResultSet rsDevices = psDevices.executeQuery()) {
-
-                while (rsDevices.next()) {
-                    String tableName = rsDevices.getString("data_collection");
-
-                    if (tableName == null || tableName.trim().isEmpty()) {
-                        de.ngi.logging.Logger.log("Skip device with NULL data_collection");
-                        continue;
-                    }
-
-                    if (!tableExists(con, storage, tableName)) {
-                        de.ngi.logging.Logger.log("Table does not exist: " + storage + "." + tableName);
-                        continue;
-                    }
-
-                    String countQuery = "SELECT COUNT(*) AS cnt FROM " + storage + "." + tableName;
-                    try (PreparedStatement psCount = con.prepareStatement(countQuery);
-                         ResultSet rsCount = psCount.executeQuery()) {
-
-                        if (rsCount.next()) {
-                            int cnt = rsCount.getInt("cnt");
-                            totalCount += cnt;
-                            de.ngi.logging.Logger.log("Counted " + cnt + " entries in " + tableName);
-                        }
-
-                    } catch (SQLException e) {
-                        de.ngi.logging.Logger.log("Warning: could not count " + tableName + " (" + e.getMessage() + ")");
-                    }
-                }
-            }
-
-        } catch (SQLException e) {
-            throw new SmartDataAccessorException("Error counting datasets: " + e.getMessage());
-        }
-
-        de.ngi.logging.Logger.log("Total dataset count across all collections: " + totalCount);
-        return totalCount;
-    }
-
-    /**
-     * Returns the average PM2.5 and PM10 values across all device data_collections.
-     */
-    public float[] fetchTotalAveragePM(String smartdataurl, String collection, String storage)
-            throws SmartDataAccessorException {
-
-        de.ngi.logging.Logger.log("Calculating total PM averages via " + smartdataurl);
-        float totalPM2_5 = 0;
-        float totalPM10 = 0;
-        int countPM2_5 = 0;
-        int countPM10 = 0;
-
-        try (Connection con = this.getConnection()) {
-            if (con == null)
-                throw new SmartDataAccessorException("No DB connection available");
-
-            String queryDevices = "SELECT data_collection FROM " + storage + "." + collection;
-            try (PreparedStatement psDevices = con.prepareStatement(queryDevices);
-                 ResultSet rsDevices = psDevices.executeQuery()) {
-
-                while (rsDevices.next()) {
-                    String tableName = rsDevices.getString("data_collection");
-
-                    if (tableName == null || tableName.trim().isEmpty()) {
-                        de.ngi.logging.Logger.log("Skip device with NULL data_collection");
-                        continue;
-                    }
-
-                    if (!tableExists(con, storage, tableName)) {
-                        de.ngi.logging.Logger.log("Table does not exist: " + storage + "." + tableName);
-                        continue;
-                    }
-
-                    // Selektiere alle gültigen Werte (ignoriere NULL)
-                    String pmQuery = "SELECT pm2_5, pm10_0 FROM " + storage + "." + tableName +
-                            " WHERE pm2_5 IS NOT NULL OR pm10_0 IS NOT NULL";
-                    try (PreparedStatement psPM = con.prepareStatement(pmQuery);
-                         ResultSet rsPM = psPM.executeQuery()) {
-
-                        while (rsPM.next()) {
-                            // PM2.5
-                            float pm2_5 = rsPM.getFloat("pm2_5");
-                            if (!rsPM.wasNull()) {
-                                totalPM2_5 += pm2_5;
-                                countPM2_5++;
-                            }
-
-                            // PM10
-                            float pm10 = rsPM.getFloat("pm10_0");
-                            if (!rsPM.wasNull()) {
-                                totalPM10 += pm10;
-                                countPM10++;
-                            }
-                        }
-
-                    } catch (SQLException e) {
-                        de.ngi.logging.Logger.log("Warning: could not read " + tableName + " (" + e.getMessage() + ")");
-                    }
-                }
-            }
-
-        } catch (SQLException e) {
-            throw new SmartDataAccessorException("Error calculating PM averages: " + e.getMessage());
-        }
-
-        // Vermeide Division durch 0
-        float avgPM2_5 = countPM2_5 > 0 ? totalPM2_5 / countPM2_5 : 0;
-        float avgPM10 = countPM10 > 0 ? totalPM10 / countPM10 : 0;
-
-        de.ngi.logging.Logger.log("Averages → PM2.5=" + avgPM2_5 + ", PM10=" + avgPM10);
-        return new float[]{avgPM2_5, avgPM10};
-    }
-
-
-    /**
      * Checks if a given table exists in the specified schema.
      */
     private boolean tableExists(Connection con, String schema, String table) {
@@ -1238,102 +1118,6 @@ public class SmartDataAccessor {
             de.ngi.logging.Logger.log("Error checking table existence for " + schema + "." + table + ": " + e.getMessage());
             return false;
         }
-    }
-
-    /**
-     * Builds a complete overview of all observed devices, including:
-     *  - id, name, data_collection, type (from tbl_ootype)
-     *  - last_sync timestamp
-     *  - position as "longitude,latitude"
-     *  - online/offline status
-     */
-    public JsonArray getDeviceOverview(String storage) throws SmartDataAccessorException {
-        de.ngi.logging.Logger.log("Accessor: Building device overview...");
-        JsonArrayBuilder resultArray = Json.createArrayBuilder();
-
-        try (Connection con = getConnection()) {
-
-            // Device info + type from tbl_ootype
-            String sqlDevices =
-                    "SELECT o.id, o.name, o.data_collection, t.name AS type " +
-                            "FROM " + storage + ".tbl_observedobject o " +
-                            "LEFT JOIN " + storage + ".tbl_ootype t ON o.ootype_id = t.id " +
-                            "ORDER BY o.id ASC";
-
-            try (PreparedStatement ps = con.prepareStatement(sqlDevices);
-                 ResultSet rs = ps.executeQuery()) {
-
-                while (rs.next()) {
-                    int id = rs.getInt("id");
-                    String name = rs.getString("name");
-                    String dataCollection = rs.getString("data_collection");
-                    String type = rs.getString("type");
-
-                    JsonObjectBuilder dev = Json.createObjectBuilder()
-                            .add("id", id)
-                            .add("name", name != null ? name : "Unknown")
-                            .add("data_collection", dataCollection != null ? dataCollection : "N/A")
-                            .add("type", type != null ? type : "N/A");
-
-                    // --- Check if there’s a valid data collection table ---
-                    if (dataCollection != null && !dataCollection.isEmpty()) {
-                        String sqlLatest =
-                                "SELECT ts, CONCAT(ST_X(pos), ',', ST_Y(pos)) AS pos " +
-                                        "FROM " + storage + "." + dataCollection + " " +
-                                        "ORDER BY ts DESC LIMIT 1";
-
-                        try (PreparedStatement ps2 = con.prepareStatement(sqlLatest);
-                             ResultSet rs2 = ps2.executeQuery()) {
-
-                            if (rs2.next()) {
-                                Timestamp ts = rs2.getTimestamp("ts");
-                                String pos = rs2.getString("pos");
-
-                                // --- last_sync timestamp ---
-                                dev.add("last_sync", ts != null ? ts.toString() : "N/A");
-
-                                // --- Position as string or empty placeholder ---
-                                if (pos != null && !pos.isEmpty() && !pos.equals(",")) {
-                                    dev.add("position", pos);
-                                } else {
-                                    dev.add("position", "N/A");
-                                }
-
-                                // --- Online/offline status ---
-                                String status = "Offline";
-                                if (ts != null && (System.currentTimeMillis() - ts.getTime()) < 5 * 60 * 1000) {
-                                    status = "Online";
-                                }
-                                dev.add("status", status);
-
-                            } else {
-                                dev.add("last_sync", "N/A");
-                                dev.add("position", "N/A");
-                                dev.add("status", "No data");
-                            }
-
-                        } catch (SQLException ex) {
-                            de.ngi.logging.Logger.log("Error reading " + dataCollection + ": " + ex.getMessage());
-                            dev.add("last_sync", "N/A");
-                            dev.add("position", "N/A");
-                            dev.add("status", "Error reading " + dataCollection);
-                        }
-                    } else {
-                        // No data collection table
-                        dev.add("last_sync", "N/A");
-                        dev.add("position", "N/A");
-                        dev.add("status", "No table");
-                    }
-
-                    resultArray.add(dev);
-                }
-            }
-
-        } catch (SQLException e) {
-            throw new SmartDataAccessorException("Error building device overview: " + e.getMessage());
-        }
-
-        return resultArray.build();
     }
 
     /**
@@ -1407,4 +1191,144 @@ public class SmartDataAccessor {
        distinctDays.sort(String::compareTo);
        return distinctDays;
    }
+
+    /**
+     * Calculates the mean from a column
+     *
+     * @param smartdataurl URL of smartdata (e.g. http://localhost:8080/SmartData)
+     * @param collection   Collections name (Tablename)
+     * @param storage      Storage name (Schemaname)
+     * @param dateattr     Name of the attribute that holds date information
+     * @param start        Start date of datasets used for calculation
+     * @param end          End date of datasets used for calculation
+     * @param column       Name of column to calculate the mean
+     * @return Mean value
+     * @throws SmartDataAccessorException if any error occurs
+     */
+    public double fetchMean(String smartdataurl, String collection, String storage, String dateattr,
+                            LocalDateTime start, LocalDateTime end, String column) throws SmartDataAccessorException {
+        Connection con = this.getConnection();
+        if (con != null) {
+            try {
+                // SQL: Durchschnitt des angegebenen Feldes berechnen
+                String sql = "SELECT AVG(\"" + column + "\") AS mean FROM \"" + storage + "\".\"" + collection + "\"";
+                if (dateattr != null && start != null && end != null) {
+                    sql += " WHERE " + dateattr + " >= '" + start + "' AND " + dateattr + " <= '" + end + "'";
+                }
+
+                PreparedStatement ps = con.prepareStatement(sql);
+                ResultSet rs = ps.executeQuery();
+
+                double mean = Double.NaN;
+                if (rs.next()) {
+                    mean = rs.getDouble("mean");
+                }
+
+                rs.close();
+                ps.close();
+                return mean;
+            } catch (Exception ex) {
+                throw new SmartDataAccessorException("Could not get mean from >" + collection + "<: " + ex.getLocalizedMessage());
+            } finally {
+                try {
+                    con.close();
+                } catch (SQLException ex) {
+                    throw new SmartDataAccessorException("Could not close db connection. Possible memory leak. " + ex.getLocalizedMessage());
+                }
+            }
+        }
+
+        // Wenn keine direkte DB-Verbindung besteht -> SmartData REST verwenden
+        List<Double> values = new ArrayList<>();
+
+        String includes = column;
+        String order = column + ",ASC"; // Reihenfolge egal für Mean
+        JsonArray datasets = this.fetchData(smartdataurl, collection, storage, includes, null, dateattr, start, end, order);
+
+        for (JsonNumber curVal : datasets.getValuesAs(JsonNumber.class)) {
+            values.add(curVal.bigDecimalValue().doubleValue());
+        }
+
+        // Mittelwert berechnen
+        return values.stream().mapToDouble(Double::doubleValue).average().orElse(Double.NaN);
+    }
+
+    /**
+     * Calculates the mean from a column using a referenced table name
+     *
+     * @param smartdataurl URL of smartdata (e.g. http://localhost:8080/SmartData)
+     * @param collection   Collections name (Tablename)
+     * @param storage      Storage name (Schemaname)
+     * @param dateattr     Name of the attribute that holds date information
+     * @param start        Start date of datasets used for calculation
+     * @param end          End date of datasets used for calculation
+     * @param column       Name of column to calculate the mean
+     * @param refColumn    Column that contains the referenced table name
+     * @return Mean value
+     * @throws SmartDataAccessorException if any error occurs
+     */
+    public double fetchMean(String smartdataurl, String collection, String storage, String dateattr,
+                            LocalDateTime start, LocalDateTime end, String column, String refColumn) throws SmartDataAccessorException {
+        Connection con = this.getConnection();
+        if (con != null) {
+            try {
+                // Hole den Referenzwert (Tabellenname) aus refColumn
+                String refSql = "SELECT DISTINCT \"" + refColumn + "\" FROM \"" + storage + "\".\"" + collection + "\"";
+                PreparedStatement psRef = con.prepareStatement(refSql);
+                ResultSet rsRef = psRef.executeQuery();
+
+                if (!rsRef.next()) {
+                    throw new SmartDataAccessorException("No reference table found in column >" + refColumn + "<");
+                }
+
+                String refTable = rsRef.getString(1);
+                rsRef.close();
+                psRef.close();
+
+                // Danach Mean aus der referenzierten Tabelle berechnen
+                String sql = "SELECT AVG(\"" + column + "\") AS mean FROM \"" + storage + "\".\"" + refTable + "\"";
+                if (dateattr != null && start != null && end != null) {
+                    sql += " WHERE " + dateattr + " >= '" + start + "' AND " + dateattr + " <= '" + end + "'";
+                }
+
+                PreparedStatement ps = con.prepareStatement(sql);
+                ResultSet rs = ps.executeQuery();
+
+                double mean = Double.NaN;
+                if (rs.next()) {
+                    mean = rs.getDouble("mean");
+                }
+
+                rs.close();
+                ps.close();
+                return mean;
+            } catch (Exception ex) {
+                throw new SmartDataAccessorException("Could not get mean from reference in >" + collection + "<: " + ex.getLocalizedMessage());
+            } finally {
+                try {
+                    con.close();
+                } catch (SQLException ex) {
+                    throw new SmartDataAccessorException("Could not close db connection. Possible memory leak. " + ex.getLocalizedMessage());
+                }
+            }
+        }
+
+        JsonArray refResult = this.fetchData(smartdataurl, collection, storage, refColumn, null, null, null, null, null);
+        if (refResult.isEmpty()) {
+            throw new SmartDataAccessorException("No reference found in column >" + refColumn + "<");
+        }
+
+        String refTable = refResult.getValuesAs(JsonString.class).get(0).getString();
+
+        List<Double> values = new ArrayList<>();
+        String includes = column;
+        String order = column + ",ASC";
+        JsonArray datasets = this.fetchData(smartdataurl, refTable, storage, includes, null, dateattr, start, end, order);
+
+        for (JsonNumber curVal : datasets.getValuesAs(JsonNumber.class)) {
+            values.add(curVal.bigDecimalValue().doubleValue());
+        }
+
+        return values.stream().mapToDouble(Double::doubleValue).average().orElse(Double.NaN);
+    }
 }

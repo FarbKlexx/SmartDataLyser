@@ -11,9 +11,7 @@ import de.smartdata.lyser.data.SmartDataAccessor;
 import de.smartdata.lyser.data.SmartDataAccessorException;
 import de.smartdata.lyser.threads.ActivindexThread;
 import de.smartdata.lyser.threads.CountThread;
-import jakarta.json.Json;
-import jakarta.json.JsonArray;
-import jakarta.json.JsonObject;
+import jakarta.json.*;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
@@ -408,28 +406,33 @@ public class StatisticResource implements Serializable {
     }
 
     @GET
-    @Path("forAllDevices")
+    @Path("mean")
+    @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @SmartUserAuth
-    @Operation(summary = "For All Devices",
-            description = "Statistics of all Devices")
+    @Operation(summary = "Mean",
+            description = "Calculates the mean of a column")
     @APIResponse(
             responseCode = "200",
-            description = "Compare result")
+            description = "Mean result")
     @APIResponse(
             responseCode = "404",
             description = "Collection could not be found")
     @APIResponse(
             responseCode = "500",
             description = "Internal error")
-    public Response forAllDevices(
-            @Parameter(description = "SmartData URL", required = true) @QueryParam("smartdataurl") String smartdataurl,
-            @Parameter(description = "Collection name") @QueryParam("collection") String collection,
-            @Parameter(description = "Storage name", schema = @Schema(type = STRING, defaultValue = "public")) @QueryParam("storage") String storage) {
+    public Response mean(
+            @Parameter(description = "SmartData URL", required = true, example = "/SmartData") @QueryParam("smartdataurl") String smartdataurl,
+            @Parameter(description = "Collections name", example = "col1") @QueryParam("collection") String collection,
+            @Parameter(description = "Storage name",
+                    schema = @Schema(type = STRING, defaultValue = "public")) @QueryParam("storage") String storage,
+            @Parameter(description = "Date attribute", example = "ts") @QueryParam("dateattribute") String dateattribute,
+            @Parameter(description = "Start date", example = "2020-12-24T18:00") @QueryParam("start") String start,
+            @Parameter(description = "End date", example = "2020-12-24T19:00") @QueryParam("end") String end,
+            @Parameter(description = "Column where to calculate mean from", example = "temp") @QueryParam("column") String column,
+            @Parameter(description = "Column where the reference is stored", example = "ref_table") @QueryParam("ref") String refColumn) {
 
         ResponseObjectBuilder rob = new ResponseObjectBuilder();
-
-        SmartDataAccessor acc = new SmartDataAccessor(smartdataurl);
 
         if (smartdataurl.startsWith("/")) {
             smartdataurl = "http://localhost:8080" + smartdataurl;
@@ -441,59 +444,150 @@ public class StatisticResource implements Serializable {
             return rob.toResponse();
         }
 
+        LocalDateTime startDate = LocalDateTime.MIN;
+        LocalDateTime endDate = LocalDateTime.MAX;
         try {
-            long countStartTS = System.nanoTime();
-            // Get number of all datasets
-            rob.add("count", acc.fetchTotalDatasetCount(smartdataurl, collection, storage));
-            long countEndTS = System.nanoTime();
-            rob.add("count_exectime", (countEndTS - countStartTS) / 1000000);
-
-            long pmStartTS = System.nanoTime();
-            // Get average pm2.5 and pm10 values
-            float[] avgPM = acc.fetchTotalAveragePM(smartdataurl, collection, storage);
-
-            rob.add("pm2_5", avgPM[0]);
-            rob.add("pm10", avgPM[1]);
-            long pmEndTS = System.nanoTime();
-            rob.add("count_exectime", (pmEndTS - pmStartTS) / 1000000);
-
-        } catch (SmartDataAccessorException ex) {
+            if (start != null) {
+                startDate = LocalDateTime.parse(start);
+            }
+        } catch (DateTimeParseException ex) {
+            rob.addErrorMessage("Could not parse start date: " + ex.getLocalizedMessage());
             rob.setStatus(Response.Status.INTERNAL_SERVER_ERROR);
-            rob.addErrorMessage("Could not get data for >" + collection + "<: " + ex.getLocalizedMessage());
+            return rob.toResponse();
+        }
+        try {
+            if (end != null) {
+                endDate = LocalDateTime.parse(end);
+            }
+        } catch (DateTimeParseException ex) {
+            rob.addErrorMessage("Could not parse end date: " + ex.getLocalizedMessage());
+            rob.setStatus(Response.Status.INTERNAL_SERVER_ERROR);
+            return rob.toResponse();
         }
 
-        rob.setStatus(Response.Status.OK);
+        SmartDataAccessor acc = new SmartDataAccessor(smartdataurl);
+
+        try {
+            double mean;
+
+            // Wenn refColumn angegeben ist, wird der Wert daraus als Tabellenname verwendet
+            if (refColumn != null && !refColumn.isEmpty()) {
+                mean = acc.fetchMean(smartdataurl, collection, storage, dateattribute, startDate, endDate, column, refColumn);
+            } else {
+                mean = acc.fetchMean(smartdataurl, collection, storage, dateattribute, startDate, endDate, column);
+            }
+
+            rob.add("mean", mean);
+            rob.setStatus(Response.Status.OK);
+        } catch (Exception ex) {
+            rob.addErrorMessage("Could not calculate mean: " + ex.getLocalizedMessage());
+            rob.setStatus(Response.Status.INTERNAL_SERVER_ERROR);
+        }
+
         return rob.toResponse();
     }
 
-    /**
-     * Returns a detailed overview of all devices including their status,
-     * last sync timestamp and position.
-     *
-     * Example:
-     * GET /SmartDataLyser/smartdatalyser/statistic/deviceOverview?smartdataurl=http://localhost:8080/SmartDataAirquality&storage=smartmonitoring
-     */
     @GET
-    @Path("/deviceOverview")
+    @Path("meanByReference")
+    @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    public Response getDeviceOverview(
+    @SmartUserAuth
+    @Operation(summary = "Mean by Reference",
+            description = "Calculates the global mean over all referenced tables in a collection")
+    public Response meanByReference(
             @QueryParam("smartdataurl") String smartdataurl,
-            @QueryParam("storage") String storage) {
+            @QueryParam("collection") String collection,
+            @QueryParam("storage") String storage,
+            @QueryParam("refColumn") String refColumn,
+            @QueryParam("column") String column,
+            @QueryParam("dateattribute") String dateattribute,
+            @QueryParam("start") String start,
+            @QueryParam("end") String end
+    ) {
+        ResponseObjectBuilder rob = new ResponseObjectBuilder();
 
-        de.ngi.logging.Logger.log("API: getDeviceOverview called");
+        if (smartdataurl == null || collection == null || refColumn == null || column == null) {
+            rob.setStatus(Response.Status.BAD_REQUEST);
+            rob.addErrorMessage("Missing required parameters: smartdataurl, collection, refColumn, column");
+            return rob.toResponse();
+        }
+
+        if (smartdataurl.startsWith("/"))
+            smartdataurl = "http://localhost:8080" + smartdataurl;
+
+        LocalDateTime startDate = LocalDateTime.MIN;
+        LocalDateTime endDate = LocalDateTime.MAX;
+        try {
+            if (start != null) startDate = LocalDateTime.parse(start);
+            if (end != null) endDate = LocalDateTime.parse(end);
+        } catch (Exception ex) {
+            rob.addWarningMessage("Invalid date format: " + ex.getMessage());
+        }
+
+        SmartDataAccessor acc = new SmartDataAccessor(smartdataurl);
+        double globalSum = 0.0;
+        int globalCount = 0;
 
         try {
-            SmartDataAccessor acc = new SmartDataAccessor(smartdataurl);
-            JsonArray overview = acc.getDeviceOverview(storage);
-            return Response.ok(overview).build();
+            JsonArray refTables = acc.fetchData(smartdataurl, collection, storage, refColumn, null, null, null, null, null);
 
-        } catch (SmartDataAccessorException e) {
-            de.ngi.logging.Logger.log("Error: " + e.getMessage());
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                    .entity(Json.createObjectBuilder()
-                            .add("error", e.getMessage())
-                            .build())
-                    .build();
+            for (JsonObject refObj : refTables.getValuesAs(JsonObject.class)) {
+                if (!refObj.containsKey(refColumn)) continue;
+                JsonValue refValue = refObj.get(refColumn);
+                if (refValue == null || refValue.getValueType() == JsonValue.ValueType.NULL) continue;
+
+                String refTable = ((JsonString) refValue).getString();
+
+                try {
+                    JsonArray data = acc.fetchData(smartdataurl, refTable, storage, column, null, dateattribute, startDate, endDate, null);
+
+                    for (JsonObject obj : data.getValuesAs(JsonObject.class)) {
+                        if (!obj.containsKey(column)) continue;
+                        JsonValue val = obj.get(column);
+
+                        if (val == null || val.getValueType() == JsonValue.ValueType.NULL)
+                            continue;
+
+                        try {
+                            double dval = switch (val.getValueType()) {
+                                case NUMBER -> ((JsonNumber) val).doubleValue();
+                                case STRING -> {
+                                    String s = ((JsonString) val).getString();
+                                    yield (s == null || s.isBlank()) ? Double.NaN : Double.parseDouble(s);
+                                }
+                                default -> Double.NaN;
+                            };
+
+                            if (!Double.isNaN(dval) && !Double.isInfinite(dval)) {
+                                globalSum += dval;
+                                globalCount++;
+                            }
+                        } catch (Exception ignored) {
+                            // ignoriert nicht-parsbare Werte
+                        }
+                    }
+
+                } catch (Exception e) {
+                    rob.addWarningMessage("Could not read " + refTable + ": " + e.getMessage());
+                }
+            }
+
+            if (globalCount == 0) {
+                rob.add("mean", Double.NaN);
+                rob.addWarningMessage("No valid numeric data found.");
+            } else {
+                rob.add("mean", globalSum / globalCount);
+            }
+
+            rob.add("count_total", globalCount);
+            rob.setStatus(Response.Status.OK);
+
+        } catch (Exception ex) {
+            rob.addErrorMessage("Could not fetch data: " + ex.getLocalizedMessage());
+            rob.setStatus(Response.Status.INTERNAL_SERVER_ERROR);
         }
+
+        return rob.toResponse();
     }
+
 }
