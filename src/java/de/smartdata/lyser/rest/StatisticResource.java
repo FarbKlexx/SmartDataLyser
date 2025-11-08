@@ -411,7 +411,7 @@ public class StatisticResource implements Serializable {
     @Produces(MediaType.APPLICATION_JSON)
     @SmartUserAuth
     @Operation(summary = "Mean",
-            description = "Calculates the mean of a column")
+            description = "Calculates the mean of a column (optionally over referenced tables)")
     @APIResponse(
             responseCode = "200",
             description = "Mean result")
@@ -438,30 +438,20 @@ public class StatisticResource implements Serializable {
             smartdataurl = "http://localhost:8080" + smartdataurl;
         }
 
-        if (collection == null) {
+        if (collection == null || column == null) {
             rob.setStatus(Response.Status.BAD_REQUEST);
-            rob.addErrorMessage("Parameter >collection< is missing.");
+            rob.addErrorMessage("Parameters >collection< and >column< are required.");
             return rob.toResponse();
         }
 
         LocalDateTime startDate = LocalDateTime.MIN;
         LocalDateTime endDate = LocalDateTime.MAX;
         try {
-            if (start != null) {
-                startDate = LocalDateTime.parse(start);
-            }
+            if (start != null) startDate = LocalDateTime.parse(start);
+            if (end != null) endDate = LocalDateTime.parse(end);
         } catch (DateTimeParseException ex) {
-            rob.addErrorMessage("Could not parse start date: " + ex.getLocalizedMessage());
-            rob.setStatus(Response.Status.INTERNAL_SERVER_ERROR);
-            return rob.toResponse();
-        }
-        try {
-            if (end != null) {
-                endDate = LocalDateTime.parse(end);
-            }
-        } catch (DateTimeParseException ex) {
-            rob.addErrorMessage("Could not parse end date: " + ex.getLocalizedMessage());
-            rob.setStatus(Response.Status.INTERNAL_SERVER_ERROR);
+            rob.addErrorMessage("Invalid date format: " + ex.getLocalizedMessage());
+            rob.setStatus(Response.Status.BAD_REQUEST);
             return rob.toResponse();
         }
 
@@ -470,10 +460,11 @@ public class StatisticResource implements Serializable {
         try {
             double mean;
 
-            // Wenn refColumn angegeben ist, wird der Wert daraus als Tabellenname verwendet
             if (refColumn != null && !refColumn.isEmpty()) {
+                // Über Referenzspalte -> mehrere Tabellen kombinieren
                 mean = acc.fetchMean(smartdataurl, collection, storage, dateattribute, startDate, endDate, column, refColumn);
             } else {
+                // Direkt aus einer Tabelle
                 mean = acc.fetchMean(smartdataurl, collection, storage, dateattribute, startDate, endDate, column);
             }
 

@@ -1193,142 +1193,162 @@ public class SmartDataAccessor {
    }
 
     /**
-     * Calculates the mean from a column
+     * Calculates the mean from a single table column.
      *
      * @param smartdataurl URL of smartdata (e.g. http://localhost:8080/SmartData)
-     * @param collection   Collections name (Tablename)
-     * @param storage      Storage name (Schemaname)
-     * @param dateattr     Name of the attribute that holds date information
-     * @param start        Start date of datasets used for calculation
-     * @param end          End date of datasets used for calculation
-     * @param column       Name of column to calculate the mean
+     * @param collection   Table name
+     * @param storage      Schema name
+     * @param dateattr     Name of the date attribute (optional)
+     * @param start        Start time (optional)
+     * @param end          End time (optional)
+     * @param column       Column to calculate the mean for
      * @return Mean value
      * @throws SmartDataAccessorException if any error occurs
      */
     public double fetchMean(String smartdataurl, String collection, String storage, String dateattr,
-                            LocalDateTime start, LocalDateTime end, String column) throws SmartDataAccessorException {
+                            LocalDateTime start, LocalDateTime end, String column)
+            throws SmartDataAccessorException {
+
         Connection con = this.getConnection();
         if (con != null) {
             try {
-                // SQL: Durchschnitt des angegebenen Feldes berechnen
+                // SQL-Abfrage zur Berechnung des Durchschnitts
                 String sql = "SELECT AVG(\"" + column + "\") AS mean FROM \"" + storage + "\".\"" + collection + "\"";
                 if (dateattr != null && start != null && end != null) {
-                    sql += " WHERE " + dateattr + " >= '" + start + "' AND " + dateattr + " <= '" + end + "'";
+                    sql += " WHERE \"" + dateattr + "\" >= '" + start + "' AND \"" + dateattr + "\" <= '" + end + "'";
                 }
 
-                PreparedStatement ps = con.prepareStatement(sql);
-                ResultSet rs = ps.executeQuery();
-
-                double mean = Double.NaN;
-                if (rs.next()) {
-                    mean = rs.getDouble("mean");
+                try (PreparedStatement ps = con.prepareStatement(sql);
+                     ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getDouble("mean");
+                    }
                 }
-
-                rs.close();
-                ps.close();
-                return mean;
+                return Double.NaN;
             } catch (Exception ex) {
-                throw new SmartDataAccessorException("Could not get mean from >" + collection + "<: " + ex.getLocalizedMessage());
+                throw new SmartDataAccessorException(
+                        "Could not get mean from >" + collection + "<: " + ex.getLocalizedMessage());
             } finally {
                 try {
                     con.close();
                 } catch (SQLException ex) {
-                    throw new SmartDataAccessorException("Could not close db connection. Possible memory leak. " + ex.getLocalizedMessage());
+                    throw new SmartDataAccessorException(
+                            "Could not close db connection. Possible memory leak. " + ex.getLocalizedMessage());
                 }
             }
         }
 
-        // Wenn keine direkte DB-Verbindung besteht -> SmartData REST verwenden
+        // --- Fallback über SmartData REST API ---
         List<Double> values = new ArrayList<>();
-
         String includes = column;
-        String order = column + ",ASC"; // Reihenfolge egal für Mean
+        String order = column + ",ASC";
         JsonArray datasets = this.fetchData(smartdataurl, collection, storage, includes, null, dateattr, start, end, order);
 
         for (JsonNumber curVal : datasets.getValuesAs(JsonNumber.class)) {
             values.add(curVal.bigDecimalValue().doubleValue());
         }
 
-        // Mittelwert berechnen
         return values.stream().mapToDouble(Double::doubleValue).average().orElse(Double.NaN);
     }
 
     /**
-     * Calculates the mean from a column using a referenced table name
+     * Calculates the mean from a column across multiple referenced tables.
+     * Only includes tables that actually exist in the database.
      *
      * @param smartdataurl URL of smartdata (e.g. http://localhost:8080/SmartData)
-     * @param collection   Collections name (Tablename)
-     * @param storage      Storage name (Schemaname)
-     * @param dateattr     Name of the attribute that holds date information
-     * @param start        Start date of datasets used for calculation
-     * @param end          End date of datasets used for calculation
-     * @param column       Name of column to calculate the mean
-     * @param refColumn    Column that contains the referenced table name
-     * @return Mean value
+     * @param collection   Parent table containing reference column
+     * @param storage      Schema name
+     * @param dateattr     Name of the date attribute (optional)
+     * @param start        Start time (optional)
+     * @param end          End time (optional)
+     * @param column       Column to calculate the mean for
+     * @param refColumn    Column that holds referenced table names
+     * @return Mean value over all referenced tables
      * @throws SmartDataAccessorException if any error occurs
      */
     public double fetchMean(String smartdataurl, String collection, String storage, String dateattr,
-                            LocalDateTime start, LocalDateTime end, String column, String refColumn) throws SmartDataAccessorException {
+                            LocalDateTime start, LocalDateTime end, String column, String refColumn)
+            throws SmartDataAccessorException {
+
         Connection con = this.getConnection();
-        if (con != null) {
-            try {
-                // Hole den Referenzwert (Tabellenname) aus refColumn
-                String refSql = "SELECT DISTINCT \"" + refColumn + "\" FROM \"" + storage + "\".\"" + collection + "\"";
-                PreparedStatement psRef = con.prepareStatement(refSql);
-                ResultSet rsRef = psRef.executeQuery();
+        if (con == null)
+            throw new SmartDataAccessorException("No database connection available for fetchMean with reference.");
 
-                if (!rsRef.next()) {
-                    throw new SmartDataAccessorException("No reference table found in column >" + refColumn + "<");
-                }
-
-                String refTable = rsRef.getString(1);
-                rsRef.close();
-                psRef.close();
-
-                // Danach Mean aus der referenzierten Tabelle berechnen
-                String sql = "SELECT AVG(\"" + column + "\") AS mean FROM \"" + storage + "\".\"" + refTable + "\"";
-                if (dateattr != null && start != null && end != null) {
-                    sql += " WHERE " + dateattr + " >= '" + start + "' AND " + dateattr + " <= '" + end + "'";
-                }
-
-                PreparedStatement ps = con.prepareStatement(sql);
-                ResultSet rs = ps.executeQuery();
-
-                double mean = Double.NaN;
-                if (rs.next()) {
-                    mean = rs.getDouble("mean");
-                }
-
-                rs.close();
-                ps.close();
-                return mean;
-            } catch (Exception ex) {
-                throw new SmartDataAccessorException("Could not get mean from reference in >" + collection + "<: " + ex.getLocalizedMessage());
-            } finally {
-                try {
-                    con.close();
-                } catch (SQLException ex) {
-                    throw new SmartDataAccessorException("Could not close db connection. Possible memory leak. " + ex.getLocalizedMessage());
+        try {
+            List<String> refTables = new ArrayList<>();
+            String refSql = "SELECT DISTINCT \"" + refColumn + "\" FROM \"" + storage + "\".\"" + collection + "\"";
+            try (PreparedStatement ps = con.prepareStatement(refSql);
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String refName = rs.getString(1);
+                    if (refName != null && !refName.isBlank()) {
+                        refTables.add(refName.trim());
+                    }
                 }
             }
+
+            if (refTables.isEmpty()) {
+                throw new SmartDataAccessorException("No referenced tables found in column >" + refColumn + "<");
+            }
+
+            List<String> existingTables = new ArrayList<>();
+            String checkSql = "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = ?";
+            try (PreparedStatement ps = con.prepareStatement(checkSql)) {
+                ps.setString(1, storage);
+                ResultSet rs = ps.executeQuery();
+                List<String> dbTables = new ArrayList<>();
+                while (rs.next()) {
+                    dbTables.add(rs.getString("tablename"));
+                }
+                rs.close();
+
+                for (String t : refTables) {
+                    if (dbTables.contains(t)) {
+                        existingTables.add(t);
+                    } else {
+                        System.out.println("[fetchMean] Skipping missing table: " + t);
+                    }
+                }
+            }
+
+            if (existingTables.isEmpty()) {
+                throw new SmartDataAccessorException("No existing referenced tables found in schema >" + storage + "<");
+            }
+
+            StringBuilder unionSql = new StringBuilder();
+            unionSql.append("SELECT AVG(\"").append(column).append("\") AS mean FROM (");
+
+            for (int i = 0; i < existingTables.size(); i++) {
+                String table = existingTables.get(i);
+                if (i > 0) unionSql.append(" UNION ALL ");
+                unionSql.append("SELECT \"").append(column).append("\" FROM \"")
+                        .append(storage).append("\".\"").append(table).append("\"");
+
+                if (dateattr != null && start != null && end != null) {
+                    unionSql.append(" WHERE \"").append(dateattr).append("\" >= '").append(start)
+                            .append("' AND \"").append(dateattr).append("\" <= '").append(end).append("'");
+                }
+            }
+
+            unionSql.append(") AS all_").append(column);
+
+            try (PreparedStatement ps = con.prepareStatement(unionSql.toString());
+                 ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getDouble("mean");
+                } else {
+                    return Double.NaN;
+                }
+            }
+
+        } catch (SQLException ex) {
+            throw new SmartDataAccessorException("SQL error while calculating mean by reference: " + ex.getLocalizedMessage());
+        } finally {
+            try {
+                con.close();
+            } catch (SQLException ex) {
+                throw new SmartDataAccessorException("Could not close DB connection. " + ex.getLocalizedMessage());
+            }
         }
-
-        JsonArray refResult = this.fetchData(smartdataurl, collection, storage, refColumn, null, null, null, null, null);
-        if (refResult.isEmpty()) {
-            throw new SmartDataAccessorException("No reference found in column >" + refColumn + "<");
-        }
-
-        String refTable = refResult.getValuesAs(JsonString.class).get(0).getString();
-
-        List<Double> values = new ArrayList<>();
-        String includes = column;
-        String order = column + ",ASC";
-        JsonArray datasets = this.fetchData(smartdataurl, refTable, storage, includes, null, dateattr, start, end, order);
-
-        for (JsonNumber curVal : datasets.getValuesAs(JsonNumber.class)) {
-            values.add(curVal.bigDecimalValue().doubleValue());
-        }
-
-        return values.stream().mapToDouble(Double::doubleValue).average().orElse(Double.NaN);
     }
 }
