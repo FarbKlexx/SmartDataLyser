@@ -63,48 +63,66 @@ public class StatisticResource implements Serializable {
     @Produces(MediaType.APPLICATION_JSON)
     @SmartUserAuth
     @Operation(summary = "Count",
-            description = "Count the number of datasets over collections")
-    @APIResponse(
-            responseCode = "200",
-            description = "Count result")
-    @APIResponse(
-            responseCode = "404",
-            description = "One of the collections could not be found")
-    @APIResponse(
-            responseCode = "500",
-            description = "Internal error")
+            description = "Count the number of datasets, optionally across referenced tables")
+    @APIResponse(responseCode = "200", description = "Count result")
+    @APIResponse(responseCode = "404", description = "Collection could not be found")
+    @APIResponse(responseCode = "500", description = "Internal error")
     public Response count(
             @Parameter(description = "SmartData URL", required = true, example = "/SmartData") @QueryParam("smartdataurl") String smartdataurl,
-            @Parameter(description = "Collections name", example = "col1,col2") @QueryParam("collections") String collections,
+            @Parameter(description = "Collection name", required = true, example = "device_overview") @QueryParam("collection") String collection,
             @Parameter(description = "Storage name",
                     schema = @Schema(type = STRING, defaultValue = "public")) @QueryParam("storage") String storage,
             @Parameter(description = "Date attribute", example = "ts") @QueryParam("dateattribute") String dateattribute,
             @Parameter(description = "Start date", example = "2020-12-24T18:00") @QueryParam("start") String start,
             @Parameter(description = "End date", example = "2020-12-24T19:00") @QueryParam("end") String end,
-            @Parameter(description = "Last X hours", example = "72") @QueryParam("lasthours") int lasthours,
-            @Parameter(description = "Exact calculation", example = "true") @QueryParam("exact") boolean exact) {
+            @Parameter(description = "Exact calculation", example = "true") @QueryParam("exact") boolean exact,
+            @Parameter(description = "Reference column containing table names", example = "data_collection") @QueryParam("ref") String refColumn) {
 
-        CountThread ct = new CountThread(smartdataurl, collections, storage, dateattribute, start, end, lasthours, exact);
-        ct.start();
+        ResponseObjectBuilder rob = new ResponseObjectBuilder();
 
-        try {
-            Thread.sleep(1500);
-        } catch (Exception ex) {
-            System.err.println("Error while sleep: " + ex.getLocalizedMessage());
+        if (smartdataurl.startsWith("/")) {
+            smartdataurl = "http://localhost:8080" + smartdataurl;
         }
 
-        // Check if data is available in cache
-        if (cache_count.containsKey(smartdataurl + collections)) {
-            return cache_count.get(smartdataurl + collections).toResponse();
-        } else {
-            ResponseObjectBuilder rob = new ResponseObjectBuilder();
-            rob.add("count", 0);
-            rob.add("tables", "");
-            rob.add("time", LocalDateTime.now());
-            rob.addWarningMessage("Statistic calculation needs more time.");
-            rob.setStatus(Response.Status.ACCEPTED);
+        if (collection == null) {
+            rob.setStatus(Response.Status.BAD_REQUEST);
+            rob.addErrorMessage("Parameter >collection< is required.");
             return rob.toResponse();
         }
+
+        // Datumsgrenzen konvertieren
+        LocalDateTime startDate = null;
+        LocalDateTime endDate = null;
+        try {
+            if (start != null) startDate = LocalDateTime.parse(start);
+            if (end != null) endDate = LocalDateTime.parse(end);
+        } catch (DateTimeParseException ex) {
+            rob.addErrorMessage("Invalid date format: " + ex.getLocalizedMessage());
+            rob.setStatus(Response.Status.BAD_REQUEST);
+            return rob.toResponse();
+        }
+
+        SmartDataAccessor acc = new SmartDataAccessor(smartdataurl);
+
+        try {
+            int count;
+
+            if (refColumn != null && !refColumn.isEmpty()) {
+                count = acc.fetchCount(smartdataurl, collection, storage, dateattribute, startDate, endDate, exact, refColumn);
+            } else {
+                count = acc.fetchCount(smartdataurl, collection, storage, dateattribute, startDate, endDate, exact);
+            }
+
+            rob.add("count", count);
+            rob.add("time", LocalDateTime.now());
+            rob.setStatus(Response.Status.OK);
+
+        } catch (SmartDataAccessorException ex) {
+            rob.addErrorMessage("Could not fetch count: " + ex.getLocalizedMessage());
+            rob.setStatus(Response.Status.INTERNAL_SERVER_ERROR);
+        }
+
+        return rob.toResponse();
     }
 
     @GET
@@ -430,7 +448,7 @@ public class StatisticResource implements Serializable {
             @Parameter(description = "Start date", example = "2020-12-24T18:00") @QueryParam("start") String start,
             @Parameter(description = "End date", example = "2020-12-24T19:00") @QueryParam("end") String end,
             @Parameter(description = "Column where to calculate mean from", example = "temp") @QueryParam("column") String column,
-            @Parameter(description = "Column where the reference is stored", example = "ref_table") @QueryParam("ref") String refColumn) {
+            @Parameter(description = "Column where the reference is stored (if present)", example = "ref_table") @QueryParam("ref") String refColumn) {
 
         ResponseObjectBuilder rob = new ResponseObjectBuilder();
 
@@ -478,6 +496,7 @@ public class StatisticResource implements Serializable {
         return rob.toResponse();
     }
 
+    /*
     @GET
     @Path("meanByReference")
     @Consumes(MediaType.APPLICATION_JSON)
@@ -580,5 +599,6 @@ public class StatisticResource implements Serializable {
 
         return rob.toResponse();
     }
+     */
 
 }

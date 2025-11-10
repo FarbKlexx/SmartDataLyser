@@ -191,6 +191,106 @@ public class SmartDataAccessor {
     }
 
     /**
+     * Gets the total number of available datasets across referenced tables.
+     * The reference table names are read from a column in the given collection.
+     *
+     * @param smartdataurl SmartData URL
+     * @param collection   Collection name that contains the reference column
+     * @param storage      Schema name
+     * @param dateattr     Date attribute (optional)
+     * @param start        Start date (optional)
+     * @param end          End date (optional)
+     * @param exact        true if exact value is wanted
+     * @param refColumn    Column containing referenced table names
+     * @return Total number of datasets across all referenced tables
+     * @throws SmartDataAccessorException if any SQL or access error occurs
+     */
+    public int fetchCount(String smartdataurl, String collection, String storage,
+                          String dateattr, LocalDateTime start, LocalDateTime end,
+                          boolean exact, String refColumn) throws SmartDataAccessorException {
+
+        Connection con = this.getConnection();
+        if (con == null)
+            throw new SmartDataAccessorException("No database connection available for fetchCount with reference.");
+
+        try {
+            List<String> refTables = new ArrayList<>();
+            String refSql = "SELECT DISTINCT \"" + refColumn + "\" FROM \"" + storage + "\".\"" + collection + "\"";
+            try (PreparedStatement ps = con.prepareStatement(refSql);
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String refName = rs.getString(1);
+                    if (refName != null && !refName.isBlank()) {
+                        refTables.add(refName.trim());
+                    }
+                }
+            }
+
+            if (refTables.isEmpty()) {
+                throw new SmartDataAccessorException("No referenced tables found in column >" + refColumn + "< of collection >" + collection + "<");
+            }
+
+            List<String> existingTables = new ArrayList<>();
+            String checkSql = "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = ?";
+            try (PreparedStatement ps = con.prepareStatement(checkSql)) {
+                ps.setString(1, storage);
+                ResultSet rs = ps.executeQuery();
+                List<String> dbTables = new ArrayList<>();
+                while (rs.next()) {
+                    dbTables.add(rs.getString("tablename"));
+                }
+                rs.close();
+
+                for (String t : refTables) {
+                    if (dbTables.contains(t)) {
+                        existingTables.add(t);
+                    } else {
+                        System.out.println("[fetchCount] Skipping missing table: " + t);
+                    }
+                }
+            }
+
+            if (existingTables.isEmpty()) {
+                throw new SmartDataAccessorException("No existing referenced tables found in schema >" + storage + "<");
+            }
+
+            int totalCount = 0;
+
+            for (String table : existingTables) {
+                String sql;
+                if (exact) {
+                    sql = "SELECT COUNT(*) FROM \"" + storage + "\".\"" + table + "\"";
+                } else {
+                    sql = "SELECT reltuples AS estimate FROM pg_class WHERE relname = '" + table + "'";
+                }
+
+                // Datumsfilter nur bei exact-Zählung
+                if (exact && dateattr != null && start != null && end != null) {
+                    sql = "SELECT COUNT(*) FROM \"" + storage + "\".\"" + table + "\" WHERE \"" + dateattr + "\" >= '" + start + "' AND \"" + dateattr + "\" <= '" + end + "'";
+                }
+
+                try (PreparedStatement ps = con.prepareStatement(sql);
+                     ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        totalCount += rs.getInt(1);
+                    }
+                }
+            }
+
+            return totalCount;
+
+        } catch (SQLException ex) {
+            throw new SmartDataAccessorException("SQL error while fetching count by reference: " + ex.getLocalizedMessage());
+        } finally {
+            try {
+                con.close();
+            } catch (SQLException ex) {
+                throw new SmartDataAccessorException("Could not close DB connection. " + ex.getLocalizedMessage());
+            }
+        }
+    }
+
+    /**
      * Calculates the aritmethic mean from a column
      *
      * @param smartdataurl URL of smartdata (e.g.
