@@ -1451,4 +1451,108 @@ public class SmartDataAccessor {
             }
         }
     }
+    
+    
+    /**
+     * Calculates the mean from a single table column with optional filtering.
+     *
+     * @param smartdataurl  URL of smartdata (e.g. http://localhost:8080/SmartData)
+     * @param collection    Table name
+     * @param storage       Schema name
+     * @param dateattr      Name of the date attribute (optional)
+     * @param start         Start time (optional)
+     * @param end           End time (optional)
+     * @param column        Column to calculate the mean for
+     * @param filterColumn  Column name to filter by (optional)
+     * @param filterValue   Value to filter for (optional)
+     * @return Mean value
+     * @throws SmartDataAccessorException if any error occurs
+     */
+    public double fetchMean(String smartdataurl, String collection, String storage, String dateattr,
+                           LocalDateTime start, LocalDateTime end, String column,
+                           String filterColumn, String filterValue)
+            throws SmartDataAccessorException {
+
+        Connection con = this.getConnection();
+        if (con != null) {
+            try {
+                // SQL-Abfrage zur Berechnung des Durchschnitts
+                String sql = "SELECT AVG(\"" + column + "\") AS mean FROM \"" + storage + "\".\"" + collection + "\"";
+                boolean hasWhere = false;
+
+                if (dateattr != null && start != null && end != null) {
+                    sql += " WHERE \"" + dateattr + "\" >= '" + start + "' AND \"" + dateattr + "\" <= '" + end + "'";
+                    hasWhere = true;
+                }
+
+                if (filterColumn != null && filterValue != null) {
+                    if (hasWhere) {
+                        sql += " AND \"" + filterColumn + "\" = '" + filterValue + "'";
+                    } else {
+                        sql += " WHERE \"" + filterColumn + "\" = '" + filterValue + "'";
+                    }
+                }
+
+                try (PreparedStatement ps = con.prepareStatement(sql);
+                     ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getDouble("mean");
+                    }
+                }
+                return Double.NaN;
+            } catch (Exception ex) {
+                throw new SmartDataAccessorException(
+                        "Could not get mean from >" + collection + "<: " + ex.getLocalizedMessage());
+            } finally {
+                try {
+                    con.close();
+                } catch (SQLException ex) {
+                    throw new SmartDataAccessorException(
+                            "Could not close db connection. Possible memory leak. " + ex.getLocalizedMessage());
+                }
+            }
+        }
+
+        // --- Fallback über SmartData REST API ---
+        // --- Fallback über SmartData REST API ---
+        List<Double> values = new ArrayList<>();
+        String includes = column;
+        String order = column + ",ASC";
+
+        // Korrigierter Aufruf: filters als List<String> erstellen
+        List<String> filters = null;
+        if (filterColumn != null && filterValue != null) {
+            filters = new ArrayList<>();
+            filters.add(filterColumn + ",eq," + filterValue); // SmartData-Filter-Syntax: "spalte,eq,wert"
+        }
+
+        JsonArray datasets = this.fetchData(
+            smartdataurl,
+            collection,
+            storage,
+            includes,
+            filters,  // Korrigiert: filters als List<String>
+            dateattr,
+            start,
+            end,
+            order
+        );
+        
+        for (JsonValue value : datasets) {
+            JsonObject obj = value.asJsonObject();
+            if (obj.containsKey(column)) {
+                try {
+                    JsonNumber num = obj.getJsonNumber(column);
+                    if (num != null) {
+                        values.add(num.doubleValue());
+                    }
+                } catch (Exception e) {
+                    // Ignoriere ungültige Werte
+                }
+            }
+        }
+
+        return values.stream().mapToDouble(Double::doubleValue).average().orElse(Double.NaN);
+    }
+
 }
