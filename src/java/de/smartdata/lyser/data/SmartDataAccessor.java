@@ -1476,7 +1476,6 @@ public class SmartDataAccessor {
         Connection con = this.getConnection();
         if (con != null) {
             try {
-                // SQL-Abfrage zur Berechnung des Durchschnitts
                 String sql = "SELECT AVG(\"" + column + "\") AS mean FROM \"" + storage + "\".\"" + collection + "\"";
                 boolean hasWhere = false;
 
@@ -1514,16 +1513,14 @@ public class SmartDataAccessor {
         }
 
         // --- Fallback über SmartData REST API ---
-        // --- Fallback über SmartData REST API ---
         List<Double> values = new ArrayList<>();
         String includes = column;
         String order = column + ",ASC";
 
-        // Korrigierter Aufruf: filters als List<String> erstellen
         List<String> filters = null;
         if (filterColumn != null && filterValue != null) {
             filters = new ArrayList<>();
-            filters.add(filterColumn + ",eq," + filterValue); // SmartData-Filter-Syntax: "spalte,eq,wert"
+            filters.add(filterColumn + ",eq," + filterValue); 
         }
 
         JsonArray datasets = this.fetchData(
@@ -1531,7 +1528,7 @@ public class SmartDataAccessor {
             collection,
             storage,
             includes,
-            filters,  // Korrigiert: filters als List<String>
+            filters,  
             dateattr,
             start,
             end,

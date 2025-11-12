@@ -448,8 +448,8 @@ public class StatisticResource implements Serializable {
             @Parameter(description = "Start date", example = "2020-12-24T18:00") @QueryParam("start") String start,
             @Parameter(description = "End date", example = "2020-12-24T19:00") @QueryParam("end") String end,
             @Parameter(description = "Column where to calculate mean from", example = "temp") @QueryParam("column") String column,
-            @Parameter(description = "Column to filter by (optional)", example = "status") @QueryParam("filterColumn") String filterColumn,
-            @Parameter(description = "Value that filterColumn must have (optional)", example = "active") @QueryParam("filterValue") String filterValue,
+            @Parameter(description = "Column to filter by (optional)", example = "id") @QueryParam("filterColumn") String filterColumn,
+            @Parameter(description = "Value that filterColumn must have (optional)", example = "100120") @QueryParam("filterValue") String filterValue,
             @Parameter(description = "Column where the reference is stored (if present)", example = "ref_table") @QueryParam("ref") String refColumn) {
 
         ResponseObjectBuilder rob = new ResponseObjectBuilder();
