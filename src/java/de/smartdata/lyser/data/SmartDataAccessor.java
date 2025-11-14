@@ -189,7 +189,7 @@ public class SmartDataAccessor {
         }
         throw new SmartDataAccessorException("Could not access >" + webTarget.getUri() + "< returned status: " + response.getStatus());
     }
-
+    
     /**
      * Gets the total number of available datasets across referenced tables.
      * The reference table names are read from a column in the given collection.
@@ -1551,5 +1551,127 @@ public class SmartDataAccessor {
 
         return values.stream().mapToDouble(Double::doubleValue).average().orElse(Double.NaN);
     }
+    
+    /**
+    * Gets the number of available datasets
+    *
+    * @param smartdataurl SmartDatas URL
+    * @param collection Collections name
+    * @param storage Storages name
+    * @param dateattr Date values holding attribute name
+    * @param start Startdate
+    * @param end Enddate
+    * @param exact true if exact value is wanted
+    * @param filterColumn Column name to filter by (optional)
+    * @param filterValue Value to filter for (optional)
+    *
+    * @return Number of available datasets
+    * @throws de.smartdata.lyser.data.SmartDataAccessorException
+    */
+   public int fetchCount(String smartdataurl, String collection, String storage, String dateattr,
+                        LocalDateTime start, LocalDateTime end, boolean exact,
+                        String filterColumn, String filterValue) throws SmartDataAccessorException {
+
+       // Local direct db access
+       Connection con = this.getConnection();
+       if (con != null && exact) {
+           try {
+               StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM \"");
+               sql.append(storage).append("\".\"").append(collection).append("\"");
+
+               List<Object> parameters = new ArrayList<>();
+
+               // Add date filters if provided
+               if (start != null && end != null) {
+                   sql.append(" WHERE \"").append(dateattr).append("\" > ? AND \"")
+                      .append(dateattr).append("\" < ?");
+                   parameters.add(start);
+                   parameters.add(end);
+               }
+
+               // Add additional filter if provided
+               if (filterColumn != null && filterValue != null) {
+                   if (parameters.isEmpty()) {
+                       sql.append(" WHERE \"").append(filterColumn).append("\" = ?");
+                   } else {
+                       sql.append(" AND \"").append(filterColumn).append("\" = ?");
+                   }
+                   parameters.add(filterValue);
+               }
+
+               PreparedStatement preparedStatement = con.prepareStatement(sql.toString());
+
+               // Set parameters
+               for (int i = 0; i < parameters.size(); i++) {
+                   preparedStatement.setObject(i + 1, parameters.get(i));
+               }
+
+               // Execute query
+               ResultSet resultSet = preparedStatement.executeQuery();
+               int count = 0;
+               if (resultSet.next()) {
+                   count = resultSet.getInt(1);
+               }
+               resultSet.close();
+               preparedStatement.close();
+               return count;
+           } catch (Exception ex) {
+               throw new SmartDataAccessorException("Could not get data from >" + collection +
+                   "< an sql error occurred: " + ex.getLocalizedMessage());
+           } finally {
+               try {
+                   con.close();
+               } catch (SQLException ex) {
+                   throw new SmartDataAccessorException("Could not close db connection. Possible memory leak." +
+                       ex.getLocalizedMessage());
+               }
+           }
+       }
+
+       // Get information about file from SmartData (fallback or when exact=false)
+       WebTarget webTarget = WebTargetCreator.createWebTarget(
+               smartdataurl + "/smartdata", "records")
+               .path(collection)
+               .queryParam("storage", storage)
+               .queryParam("countonly", true);
+
+       // Add date filters if provided
+       if (start != null && end != null) {
+           webTarget = webTarget.queryParam("filter", dateattr + ",gt," + start);
+           webTarget = webTarget.queryParam("filter", dateattr + ",lt," + end);
+       }
+
+       // Add additional filter if provided
+       if (filterColumn != null && filterValue != null) {
+           webTarget = webTarget.queryParam("filter", filterColumn + ",eq," + filterValue);
+       }
+
+       // Note request URI for documentation
+       this.smartdataRequest = webTarget.getUri().toString();
+
+       Response response = webTarget.request(MediaType.APPLICATION_JSON).get();
+       String responseText = response.readEntity(String.class);
+
+       if (Response.Status.OK.getStatusCode() == response.getStatus()) {
+           try (JsonParser parser = Json.createParser(new StringReader(responseText))) {
+               parser.next();
+               JsonArray records = parser.getObject().getJsonArray("records");
+               if (records == null) {
+                   throw new SmartDataAccessorException("Could not get data from >" +
+                       webTarget.getUri() + "< returned no >records<");
+               }
+               JsonObject cobj = records.getJsonObject(0);
+               if (cobj == null) {
+                   throw new SmartDataAccessorException("Could not get data from >" +
+                       webTarget.getUri() + "< returned no >data<");
+               }
+               return cobj.getInt("count");
+           }
+       }
+
+       throw new SmartDataAccessorException("Could not access >" + webTarget.getUri() +
+           "< returned status: " + response.getStatus());
+   }
+
 
 }

@@ -76,6 +76,8 @@ public class StatisticResource implements Serializable {
             @Parameter(description = "Start date", example = "2020-12-24T18:00") @QueryParam("start") String start,
             @Parameter(description = "End date", example = "2020-12-24T19:00") @QueryParam("end") String end,
             @Parameter(description = "Exact calculation", example = "true") @QueryParam("exact") boolean exact,
+            @Parameter(description = "Column to filter by (optional)", example = "id") @QueryParam("filterColumn") String filterColumn,
+            @Parameter(description = "Value that filterColumn must have (optional)", example = "100120") @QueryParam("filterValue") String filterValue,
             @Parameter(description = "Reference column containing table names", example = "data_collection") @QueryParam("ref") String refColumn) {
 
         ResponseObjectBuilder rob = new ResponseObjectBuilder();
@@ -109,6 +111,8 @@ public class StatisticResource implements Serializable {
 
             if (refColumn != null && !refColumn.isEmpty()) {
                 count = acc.fetchCount(smartdataurl, collection, storage, dateattribute, startDate, endDate, exact, refColumn);
+            } else if(filterColumn != null && !filterColumn.isEmpty() && filterValue != null && !filterValue.isEmpty()) {
+                count = acc.fetchCount(smartdataurl, collection, storage, dateattribute, startDate, endDate, exact, filterColumn, filterValue);
             } else {
                 count = acc.fetchCount(smartdataurl, collection, storage, dateattribute, startDate, endDate, exact);
             }
