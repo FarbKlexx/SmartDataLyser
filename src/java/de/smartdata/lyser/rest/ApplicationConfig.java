@@ -34,7 +34,6 @@ public class ApplicationConfig extends Application {
         resources.add(de.smartdata.lyser.rest.CompareResource.class);
         resources.add(de.smartdata.lyser.rest.DataAggregationResource.class);
         resources.add(de.smartdata.lyser.rest.GeoResource.class);
-        resources.add(de.smartdata.lyser.rest.RoutenResource.class);
         resources.add(de.smartdata.lyser.rest.StatisticResource.class);
         resources.add(de.smartdata.lyser.rest.SystemResource.class);
     }
